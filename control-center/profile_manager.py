@@ -29,7 +29,10 @@ class ProfileManager:
         if not os.path.isfile(self.path):
             return {"active": "default", "profiles": {"default": dict(DEFAULT_PROFILE)}}
         with open(self.path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            try:
+                data = json.load(f)
+            except (json.JSONDecodeError, ValueError):
+                return {"active": "default", "profiles": {"default": dict(DEFAULT_PROFILE)}}
         data.setdefault("active", "default")
         data.setdefault("profiles", {})
         data["profiles"].setdefault("default", dict(DEFAULT_PROFILE))
