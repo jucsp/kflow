@@ -1,0 +1,23 @@
+{
+    "KPlugin": {
+        "Id": "kflow",
+        "Name": "KFlow",
+        "Description": "Motor de tiling dinámico con Gaps, Márgenes y AutoVirtualDesktop para KDE Plasma 6",
+        "Icon": "preferences-system-windows",
+        "Authors": [
+            {
+                "Name": "Garage Labs",
+                "Email": "juanc.saavedra07@gmail.com"
+            }
+        ],
+        "Category": "Window Management",
+        "License": "GPL-3.0",
+        "Version": "0.1.0",
+        "Website": "https://github.com/garagelabs/kflow"
+    },
+    "X-Plasma-API": "declarativescript",
+    "X-KDE-PluginInfo-Category": "Window Management",
+    "X-KDE-ServiceTypes": [
+        "KWin/Script"
+    ]
+}

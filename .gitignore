@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.env
+
+# KDE / Local Configs / Build
+*.qmlc
+*.jsc
+build/
+dist/
+
+# Logs & Temp
+*.log
+*.tmp
+.DS_Store
