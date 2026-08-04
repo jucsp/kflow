@@ -73,6 +73,17 @@ def build_load_script_command(qdbus_bin=None, script_path=None):
     ]
 
 
+def build_run_script_command(script_id, qdbus_bin=None):
+    """`loadDeclarativeScript` deja el script en /Scripting/Script<ID> en
+    estado PAUSADO: KWin no lo ejecuta hasta invocar Script.run() sobre ese
+    objeto (ver hallazgo técnico v0.2.10)."""
+    qdbus_bin = qdbus_bin or find_qdbus_binary() or "qdbus"
+    return [
+        qdbus_bin, "org.kde.KWin", f"/Scripting/Script{script_id}",
+        "org.kde.kwin.Script.run",
+    ]
+
+
 def run_command(cmd):
     """Ejecuta `cmd`, registrando en stdout el comando, su código de retorno
     y su salida (stdout/stderr) con el prefijo LOG_PREFIX, para poder
@@ -100,15 +111,27 @@ def trigger_reconfigure():
     ya cargados vía Options.configChanged, pero si el script no está
     escuchando esa señal o quedó en un estado inconsistente, los cambios de
     kwinrc nunca se aplican. Para garantizar la recarga se dispara además
-    unloadScript + loadDeclarativeScript vía la interfaz /Scripting."""
-    print(f"{LOG_PREFIX} [1/3] Disparando /KWin reconfigure...", flush=True)
+    unloadScript + loadDeclarativeScript vía la interfaz /Scripting.
+
+    Además, `loadDeclarativeScript` devuelve el ID del script y lo deja
+    PAUSADO en /Scripting/Script<ID> hasta invocar Script.run() (ver
+    hallazgo técnico v0.2.10): sin ese paso final, el script nunca llega a
+    ejecutarse pese a haberse cargado correctamente."""
+    print(f"{LOG_PREFIX} [1/4] Disparando /KWin reconfigure...", flush=True)
     run_command(build_reconfigure_command())
 
-    print(f"{LOG_PREFIX} [2/3] Descargando script declarativo '{KWIN_SCRIPT_NAME}' vía /Scripting.unloadScript...", flush=True)
+    print(f"{LOG_PREFIX} [2/4] Descargando script declarativo '{KWIN_SCRIPT_NAME}' vía /Scripting.unloadScript...", flush=True)
     run_command(build_unload_script_command())
 
-    print(f"{LOG_PREFIX} [3/3] Recargando script declarativo desde {KWIN_SCRIPT_MAIN_QML} vía /Scripting.loadDeclarativeScript...", flush=True)
-    run_command(build_load_script_command())
+    print(f"{LOG_PREFIX} [3/4] Recargando script declarativo desde {KWIN_SCRIPT_MAIN_QML} vía /Scripting.loadDeclarativeScript...", flush=True)
+    load_result = run_command(build_load_script_command())
+
+    script_id = load_result.stdout.strip()
+    if script_id.isdigit():
+        print(f"{LOG_PREFIX} [4/4] Arrancando script declarativo (ID {script_id}) vía /Scripting/Script{script_id}.run...", flush=True)
+        run_command(build_run_script_command(script_id))
+    else:
+        print(f"{LOG_PREFIX} [4/4] loadDeclarativeScript no devolvió un ID numérico ('{script_id}'); se omite Script.run", flush=True)
 
 
 def apply_and_reconfigure(updates):

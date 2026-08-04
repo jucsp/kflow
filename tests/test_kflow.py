@@ -15,7 +15,7 @@ import sys
 import tempfile
 import unittest
 import copy
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 # ---------------------------------------------------------------------------
 # Asegurar que control-center/ está en sys.path para importar sus módulos
@@ -52,6 +52,7 @@ from dbus_service import (
     build_reconfigure_command,
     build_unload_script_command,
     build_load_script_command,
+    build_run_script_command,
     find_qdbus_binary,
     apply_and_reconfigure,
     write_config,
@@ -563,25 +564,48 @@ class DBusServiceHelpersTest(unittest.TestCase):
     def test_build_load_script_command_uses_local_share_kwin_scripts_path(self):
         self.assertIn(".local/share/kwin/scripts/kflow/contents/ui/main.qml", KWIN_SCRIPT_MAIN_QML)
 
+    def test_build_run_script_command(self):
+        cmd = build_run_script_command("0", qdbus_bin="qdbus")
+        self.assertEqual(cmd[0], "qdbus")
+        self.assertEqual(cmd[1], "org.kde.KWin")
+        self.assertEqual(cmd[2], "/Scripting/Script0")
+        self.assertEqual(cmd[3], "org.kde.kwin.Script.run")
+
     def test_find_qdbus_binary_returns_string_or_none(self):
         result = find_qdbus_binary()
         self.assertTrue(result is None or isinstance(result, str))
 
-    def test_trigger_reconfigure_calls_reconfigure_then_unload_then_load(self):
-        """trigger_reconfigure() debe disparar /KWin reconfigure y además
-        forzar la recarga del script declarativo vía /Scripting
-        (unloadScript + loadDeclarativeScript), ya que en Plasma 6
-        'reconfigure' por sí solo no reinstancia KWin Scripts declarativos."""
-        with patch.object(dbus_service, "run_command") as mock_run:
+    def test_trigger_reconfigure_calls_reconfigure_then_unload_then_load_then_run(self):
+        """trigger_reconfigure() debe disparar /KWin reconfigure, forzar la
+        recarga del script declarativo vía /Scripting (unloadScript +
+        loadDeclarativeScript) y, cuando loadDeclarativeScript devuelve un
+        ID numérico, invocar Script.run() sobre /Scripting/Script<ID> para
+        sacarlo del estado PAUSADO (ver hallazgo técnico v0.2.10)."""
+        def fake_run_command(cmd):
+            result = MagicMock()
+            result.stdout = "0\n" if cmd == build_load_script_command() else ""
+            return result
+
+        with patch.object(dbus_service, "run_command", side_effect=fake_run_command) as mock_run:
             trigger_reconfigure()
 
-        self.assertEqual(mock_run.call_count, 3)
-        reconfigure_cmd, unload_cmd, load_cmd = (
+        self.assertEqual(mock_run.call_count, 4)
+        reconfigure_cmd, unload_cmd, load_cmd, run_cmd = (
             c.args[0] for c in mock_run.call_args_list
         )
         self.assertEqual(reconfigure_cmd, build_reconfigure_command())
         self.assertEqual(unload_cmd, build_unload_script_command())
         self.assertEqual(load_cmd, build_load_script_command())
+        self.assertEqual(run_cmd, build_run_script_command("0"))
+
+    def test_trigger_reconfigure_skips_run_when_script_id_not_numeric(self):
+        """Si loadDeclarativeScript no devuelve un ID numérico en stdout
+        (falla o formato inesperado), no debe invocarse Script.run()."""
+        with patch.object(dbus_service, "run_command") as mock_run:
+            mock_run.return_value = MagicMock(stdout="")
+            trigger_reconfigure()
+
+        self.assertEqual(mock_run.call_count, 3)
 
     def test_apply_and_reconfigure_serializes_dict_to_json(self):
         """Verifica que apply_and_reconfigure acepta dicts y bools sin error
