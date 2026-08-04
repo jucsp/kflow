@@ -69,6 +69,7 @@ QtObject {
     }
 
     function reloadFromDisk() {
+        console.log("[KFLOW-KWIN] reloadFromDisk() — releyendo kwinrc (Script-kflow)...");
         innerGap = parseInt(KWin.readConfig("InnerGap", "8"), 10);
         outerMargins = {
             top: parseInt(KWin.readConfig("OuterMarginTop", "24"), 10),
@@ -93,6 +94,12 @@ QtObject {
         }
 
         bridge._lastRawConfig = bridge._rawConfigSnapshot();
+        console.log("[KFLOW-KWIN] Config cargada: innerGap=" + innerGap
+            + " outerMargins=" + JSON.stringify(outerMargins)
+            + " autoTilingEnabled=" + autoTilingEnabled
+            + " autoVirtualDesktop=" + autoVirtualDesktop
+            + " activeProfile=" + activeProfile
+            + " layoutTree=" + (layoutTree ? JSON.stringify(layoutTree) : "null"));
     }
 
     function setInnerGap(pixels) {
@@ -125,6 +132,7 @@ QtObject {
         onTriggered: {
             var snap = bridge._rawConfigSnapshot();
             if (snap !== bridge._lastRawConfig) {
+                console.log("[KFLOW-KWIN] Cambio detectado en kwinrc (poll de 400ms) — disparando reloadFromDisk()");
                 bridge.reloadFromDisk();
                 bridge.configurationChanged();
             }

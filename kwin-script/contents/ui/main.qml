@@ -30,12 +30,22 @@ Item {
         var all = Workspace.windows;
         for (var i = 0; i < all.length; ++i) {
             var w = all[i];
-            if (!isTileable(w)) continue;
+            if (!isTileable(w)) {
+                console.log("[KFLOW-KWIN] Ventana ignorada (\"" + w.caption + "\"): "
+                    + "normalWindow=" + w.normalWindow
+                    + " minimized=" + w.minimized
+                    + " fullScreen=" + w.fullScreen
+                    + " keepAbove=" + w.keepAbove
+                    + " keepBelow=" + w.keepBelow);
+                continue;
+            }
             if (w.output !== screen) continue;
             if (w.onAllDesktops || w.desktops.indexOf(desktop) !== -1) {
                 result.push(w);
             }
         }
+        console.log("[KFLOW-KWIN] Pantalla " + screen + ", escritorio " + desktop
+            + ": " + result.length + " ventana(s) tileable(s) detectada(s) de " + all.length + " total(es)");
         return result;
     }
 
@@ -43,10 +53,14 @@ Item {
     function retile(desktop, screen) {
         var bridge = dbusLoader.item;
         if (!bridge || !bridge.autoTilingEnabled) {
+            console.log("[KFLOW-KWIN] retile() abortado — bridge no cargado o autoTilingEnabled=false"
+                + " (pantalla=" + screen + ", escritorio=" + desktop + ")");
             return;
         }
         var windows = windowsOnDesktopAndScreen(desktop, screen);
         if (windows.length === 0) {
+            console.log("[KFLOW-KWIN] retile() sin ventanas que tilear en pantalla=" + screen
+                + ", escritorio=" + desktop + " — nada que hacer");
             return;
         }
         var area = Workspace.clientArea(KWin.PlacementArea, screen, desktop);
@@ -56,17 +70,26 @@ Item {
         var rects;
         var tree = bridge.layoutTree;
         if (tree && tree.type && Engine.countLeaves(tree) === windows.length) {
+            console.log("[KFLOW-KWIN] retile() usando layout_tree personalizado ("
+                + Engine.countLeaves(tree) + " hojas)");
             rects = Engine.computeLayoutFromTree(tree, area, bridge.innerGap, bridge.outerMargins);
             // Fallback: si computeLayoutFromTree devuelve vacío, usar BSP
             if (!rects || rects.length === 0) {
+                console.log("[KFLOW-KWIN] computeLayoutFromTree() devolvió vacío — fallback a BSP automático");
                 rects = Engine.computeLayout(area, bridge.innerGap, bridge.outerMargins, windows.length);
             }
         } else {
+            console.log("[KFLOW-KWIN] retile() usando BSP automático (sin layout_tree o no coincide el número de hojas)");
             rects = Engine.computeLayout(area, bridge.innerGap, bridge.outerMargins, windows.length);
         }
 
         var count = Math.min(windows.length, rects.length);
+        console.log("[KFLOW-KWIN] Aplicando retiling en pantalla=" + screen + ", escritorio=" + desktop
+            + ": " + count + " ventana(s), área=" + JSON.stringify(area)
+            + ", innerGap=" + bridge.innerGap + ", outerMargins=" + JSON.stringify(bridge.outerMargins));
         for (var i = 0; i < count; ++i) {
+            console.log("[KFLOW-KWIN]   ventana \"" + windows[i].caption + "\" -> geometry="
+                + JSON.stringify(rects[i]));
             windows[i].frameGeometry = Qt.rect(rects[i].x, rects[i].y, rects[i].width, rects[i].height);
         }
     }

@@ -14,6 +14,7 @@ Ventana principal con:
     org.kde.KWin.KFlow si QtDBus está disponible.
 """
 
+import json
 import os
 import sys
 
@@ -572,7 +573,21 @@ class KFlowMainWindow(QMainWindow):
         else:
             updates["LayoutTree"] = ""
 
+        layout_tree_json = (
+            json.dumps(updates["LayoutTree"], separators=(",", ":"))
+            if updates["LayoutTree"]
+            else ""
+        )
+        print(
+            "[KFLOW-GUI] Botón 'Aplicar ahora' presionado — parámetros recibidos: "
+            f"InnerGap={inner}, OuterPadding={margins}, "
+            f"AutoVirtualDesktop={auto_vd}, ActiveProfile={active_name}, "
+            f"LayoutTreeJson={layout_tree_json!r}",
+            flush=True,
+        )
+
         apply_and_reconfigure(updates)
+        print("[KFLOW-GUI] apply_and_reconfigure() completado sin excepciones.", flush=True)
 
         # Persistir en perfil activo
         self._profile_mgr.save_profile(

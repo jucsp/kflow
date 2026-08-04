@@ -35,5 +35,30 @@ make install
 
 ---
 
+## 🩺 Diagnóstico y Logs en Vivo
+
+KFlow imprime logs verbosos con prefijo `[KFLOW-GUI]` (Control Center) y `[KFLOW-KWIN]` (motor KWin) para diagnosticar problemas como "Aplicar ahora no aplica el retiling".
+
+**Control Center** — ejecuta `main.py` desde una terminal y observa el stdout directamente:
+
+```bash
+python3 control-center/main.py
+```
+
+**Motor KWin** — sus logs (`console.log`) van al journal de systemd del proceso de KWin. Para verlos en vivo:
+
+```bash
+# Plasma Wayland
+journalctl -f --user-unit=plasma-kwin_wayland | grep KFLOW
+
+# Plasma X11
+journalctl -f --user-unit=plasma-kwin_x11 | grep KFLOW
+
+# Alternativa genérica si no se conoce la unidad exacta
+journalctl -f | grep KFLOW
+```
+
+---
+
 ## 📄 Licencia
 Este proyecto está distribuido bajo la licencia **MIT**. Consulta el archivo `LICENSE` para más detalles.

@@ -25,6 +25,8 @@ OBJECT_PATH = "/KFlow"
 INTERFACE_NAME = "org.kde.KWin.KFlow"
 KWINRC_GROUP = "Script-kflow"
 
+LOG_PREFIX = "[KFLOW-GUI]"
+
 _QDBUS_CANDIDATES = ("qdbus-qt6", "qdbus6", "qdbus")
 
 
@@ -46,7 +48,18 @@ def build_reconfigure_command(qdbus_bin=None):
 
 
 def run_command(cmd):
-    subprocess.run(cmd, check=True)
+    """Ejecuta `cmd`, registrando en stdout el comando, su código de retorno
+    y su salida (stdout/stderr) con el prefijo LOG_PREFIX, para poder
+    diagnosticar por qué 'Aplicar ahora' no retilea (ver auditoría v0.2.3)."""
+    print(f"{LOG_PREFIX} Ejecutando: {' '.join(cmd)}", flush=True)
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    print(f"{LOG_PREFIX}   código de retorno: {result.returncode}", flush=True)
+    if result.stdout.strip():
+        print(f"{LOG_PREFIX}   stdout: {result.stdout.strip()}", flush=True)
+    if result.stderr.strip():
+        print(f"{LOG_PREFIX}   stderr: {result.stderr.strip()}", flush=True)
+    result.check_returncode()
+    return result
 
 
 def write_config(key, value):
@@ -59,9 +72,10 @@ def trigger_reconfigure():
 
 def apply_and_reconfigure(updates):
     """Escribe varias claves en kwinrc y dispara UN solo reconfigure al final.
-    
+
     `updates` es un dict clave → valor. Los valores pueden ser str, int, bool,
     o dict (se serializan a JSON para claves como LayoutTree)."""
+    print(f"{LOG_PREFIX} apply_and_reconfigure() recibió: {updates}", flush=True)
     for key, value in updates.items():
         if isinstance(value, (dict, list)):
             import json
