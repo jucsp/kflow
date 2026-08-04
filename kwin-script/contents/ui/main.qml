@@ -13,12 +13,33 @@ Item {
     readonly property int desktopThreshold: 4
     property var lastDesktopCounts: new Map()
 
+    // Valores de respaldo usados cuando dbusLoader.item aún no ha cargado
+    // (o el bridge es null) para no abortar el retiling en el arranque.
+    readonly property var fallbackDefaults: ({
+        autoTilingEnabled: true,
+        innerGap: 12,
+        outerMargins: { top: 12, bottom: 12, left: 12, right: 12 }
+    })
+
     function isTileable(window) {
-        return window.normalWindow
-            && !window.minimized
-            && !window.fullScreen
-            && !window.keepAbove
-            && !window.keepBelow;
+        var isSpecial = window.desktopWindow || window.dock || window.splash || window.notification;
+        var isBusy = window.minimized || window.fullScreen;
+        // En KWin 6 / Wayland, normalWindow puede venir undefined/false para
+        // apps como Ghostty, Alacritty, Konsole, Firefox o Chrome. Se acepta
+        // la ventana si es normalWindow, o si no es special/utility.
+        var result = !isSpecial && !isBusy
+            && (!!window.normalWindow || (!window.specialWindow && !window.utility));
+        console.log("[KFLOW-KWIN] isTileable(\"" + window.caption + "\") = " + result
+            + " [normalWindow=" + window.normalWindow
+            + " specialWindow=" + window.specialWindow
+            + " utility=" + window.utility
+            + " desktopWindow=" + window.desktopWindow
+            + " dock=" + window.dock
+            + " splash=" + window.splash
+            + " notification=" + window.notification
+            + " minimized=" + window.minimized
+            + " fullScreen=" + window.fullScreen + "]");
+        return result;
     }
 
     function windowsOnDesktopAndScreen(desktop, screen) {
@@ -26,15 +47,7 @@ Item {
         var all = Workspace.windows;
         for (var i = 0; i < all.length; ++i) {
             var w = all[i];
-            if (!isTileable(w)) {
-                console.log("[KFLOW-KWIN] Ventana ignorada (\"" + w.caption + "\"): "
-                    + "normalWindow=" + w.normalWindow
-                    + " minimized=" + w.minimized
-                    + " fullScreen=" + w.fullScreen
-                    + " keepAbove=" + w.keepAbove
-                    + " keepBelow=" + w.keepBelow);
-                continue;
-            }
+            if (!isTileable(w)) continue;
             if (w.output !== screen) continue;
             if (w.onAllDesktops || w.desktops.indexOf(desktop) !== -1) {
                 result.push(w);
@@ -47,8 +60,18 @@ Item {
 
     function retile(desktop, screen) {
         var bridge = dbusLoader.item;
-        if (!bridge || !bridge.autoTilingEnabled) {
-            console.log("[KFLOW-KWIN] retile() abortado — bridge no cargado o autoTilingEnabled=false"
+        var usingFallback = !bridge;
+        var autoTilingEnabled = usingFallback ? kflow.fallbackDefaults.autoTilingEnabled : bridge.autoTilingEnabled;
+        var innerGap = usingFallback ? kflow.fallbackDefaults.innerGap : bridge.innerGap;
+        var outerMargins = usingFallback ? kflow.fallbackDefaults.outerMargins : bridge.outerMargins;
+        var layoutTree = usingFallback ? null : bridge.layoutTree;
+
+        if (usingFallback) {
+            console.log("[KFLOW-KWIN] retile() — bridge aún no cargado, usando valores por defecto seguros"
+                + " (pantalla=" + screen + ", escritorio=" + desktop + ")");
+        }
+        if (!autoTilingEnabled) {
+            console.log("[KFLOW-KWIN] retile() abortado — autoTilingEnabled=false"
                 + " (pantalla=" + screen + ", escritorio=" + desktop + ")");
             return;
         }
@@ -61,24 +84,24 @@ Item {
         var area = Workspace.clientArea(KWin.PlacementArea, screen, desktop);
 
         var rects;
-        var tree = bridge.layoutTree;
+        var tree = layoutTree;
         if (tree && tree.type && Engine.countLeaves(tree) === windows.length) {
             console.log("[KFLOW-KWIN] retile() usando layout_tree personalizado ("
                 + Engine.countLeaves(tree) + " hojas)");
-            rects = Engine.computeLayoutFromTree(tree, area, bridge.innerGap, bridge.outerMargins);
+            rects = Engine.computeLayoutFromTree(tree, area, innerGap, outerMargins);
             if (!rects || rects.length === 0) {
                 console.log("[KFLOW-KWIN] computeLayoutFromTree() devolvió vacío — fallback a BSP automático");
-                rects = Engine.computeLayout(area, bridge.innerGap, bridge.outerMargins, windows.length);
+                rects = Engine.computeLayout(area, innerGap, outerMargins, windows.length);
             }
         } else {
             console.log("[KFLOW-KWIN] retile() usando BSP automático (sin layout_tree o no coincide el número de hojas)");
-            rects = Engine.computeLayout(area, bridge.innerGap, bridge.outerMargins, windows.length);
+            rects = Engine.computeLayout(area, innerGap, outerMargins, windows.length);
         }
 
         var count = Math.min(windows.length, rects.length);
         console.log("[KFLOW-KWIN] Aplicando retiling en pantalla=" + screen + ", escritorio=" + desktop
             + ": " + count + " ventana(s), área=" + JSON.stringify(area)
-            + ", innerGap=" + bridge.innerGap + ", outerMargins=" + JSON.stringify(bridge.outerMargins));
+            + ", innerGap=" + innerGap + ", outerMargins=" + JSON.stringify(outerMargins));
         for (var i = 0; i < count; ++i) {
             console.log("[KFLOW-KWIN]   ventana \"" + windows[i].caption + "\" -> geometry="
                 + JSON.stringify(rects[i]));
@@ -157,6 +180,20 @@ Item {
             hookWindow(all[i]);
         }
         kflow.onWorkspaceChanged();
+        initialRetileTimer.start();
+    }
+
+    // Reacomoda las ventanas ya abiertas 100ms después del arranque (o al
+    // recargar el script vía "Aplicar ahora"), una vez que dbusLoader.item
+    // ya tuvo tiempo de cargar y el workspace está estable.
+    Timer {
+        id: initialRetileTimer
+        interval: 100
+        repeat: false
+        onTriggered: {
+            console.log("[KFLOW-KWIN] initialRetileTimer disparado — forzando retileAllScreens() inicial");
+            kflow.retileAllScreens();
+        }
     }
 
     Connections {
