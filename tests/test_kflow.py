@@ -614,5 +614,50 @@ class KWinScriptSyntaxTest(unittest.TestCase):
         self.assertGreater(len(content), 100)
 
 
+# ===================================================================
+# main.qml — uso correcto del singleton 'workspace' (no el tipo 'Workspace')
+# ===================================================================
+class KWinScriptWorkspaceSingletonTest(unittest.TestCase):
+    """Regresión: 'Workspace' (mayúscula) es el tipo importado de
+    org.kde.kwin y NO expone windowList()/windows/clientArea()/etc. El
+    objeto inyectado por KWin en tiempo de ejecución es 'workspace'
+    (minúscula). Usar 'Workspace' hace que getWindows() devuelva [] y
+    KWin nunca detecte ventanas para tilear.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        qml_path = os.path.join(
+            _PROJECT_ROOT, "kwin-script", "contents", "ui", "main.qml"
+        )
+        with open(qml_path, "r", encoding="utf-8") as f:
+            cls.content = f.read()
+
+    def test_no_capitalized_workspace_type_usage(self):
+        import re
+        # Cualquier "Workspace" con W mayúscula que no sea parte del
+        # identificador de función 'onWorkspaceChanged' es una regresión.
+        matches = [
+            m.group(0)
+            for m in re.finditer(r"\bWorkspace\b", self.content)
+        ]
+        self.assertEqual(
+            matches, [],
+            "main.qml usa el tipo 'Workspace' (mayúscula) en vez del "
+            "singleton 'workspace' inyectado por KWin en runtime"
+        )
+
+    def test_uses_lowercase_workspace_singleton(self):
+        self.assertIn("workspace.windowList", self.content)
+        self.assertIn("workspace.clientArea", self.content)
+        self.assertIn("target: workspace", self.content)
+
+    def test_get_windows_logs_detected_count(self):
+        self.assertIn("getWindows()", self.content)
+        self.assertIn("console.warn", self.content)
+        get_windows_body = self.content.split("function getWindows()")[1].split("}")[0]
+        self.assertIn("console.warn", get_windows_body)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -21,12 +21,13 @@ Item {
         outerMargins: { top: 12, bottom: 12, left: 12, right: 12 }
     })
 
-    // KROHNKITE PATTERN: en KWin 6, Workspace puede exponer windowList()
+    // KROHNKITE PATTERN: en KWin 6, workspace puede exponer windowList()
     // (Wayland) o la propiedad windows (X11/versiones previas). Se intenta
     // primero windowList() y se cae a windows como fallback.
     function getWindows() {
-        if (typeof Workspace.windowList === 'function') return Workspace.windowList();
-        return Workspace.windows || [];
+        var list = (typeof workspace.windowList === 'function') ? workspace.windowList() : (workspace.windows || []);
+        console.warn("[KFLOW-KWIN] getWindows() — " + list.length + " ventana(s) detectada(s) desde workspace");
+        return list;
     }
 
     // KROHNKITE PATTERN: filtrado exacto adoptado de src/driver/kwin/kwinwindow.ts
@@ -78,7 +79,7 @@ Item {
                 + ", escritorio=" + desktop + " — nada que hacer");
             return;
         }
-        var area = Workspace.clientArea(KWin.PlacementArea, screen, desktop);
+        var area = workspace.clientArea(KWin.PlacementArea, screen, desktop);
 
         var rects;
         var tree = layoutTree;
@@ -109,8 +110,8 @@ Item {
     }
 
     function retileAllScreens() {
-        var screens = Workspace.screens;
-        var desktop = Workspace.currentDesktop;
+        var screens = workspace.screens;
+        var desktop = workspace.currentDesktop;
         for (var i = 0; i < screens.length; ++i) {
             retile(desktop, screens[i]);
         }
@@ -121,7 +122,7 @@ Item {
         if (!bridge || !bridge.autoVirtualDesktop) {
             return;
         }
-        var desktops = Workspace.desktops;
+        var desktops = workspace.desktops;
         for (var d = desktops.length - 1; d >= 0; --d) {
             var desktop = desktops[d];
             var count = 0;
@@ -132,13 +133,13 @@ Item {
                     count++;
                 }
             }
-            if (Engine.shouldRemoveDesktop(count, Workspace.desktops.length)) {
-                Workspace.removeDesktop(desktop);
+            if (Engine.shouldRemoveDesktop(count, workspace.desktops.length)) {
+                workspace.removeDesktop(desktop);
                 kflow.lastDesktopCounts.delete(desktop);
             }
         }
 
-        var current = Workspace.currentDesktop;
+        var current = workspace.currentDesktop;
         var currentCount = 0;
         var allWindows = getWindows();
         for (var j = 0; j < allWindows.length; ++j) {
@@ -153,8 +154,8 @@ Item {
         var crossedThreshold = previousCount < kflow.desktopThreshold
             && Engine.shouldCreateDesktop(currentCount, kflow.desktopThreshold);
         if (crossedThreshold) {
-            var position = Workspace.desktops.indexOf(current) + 1;
-            Workspace.createDesktop(position, "KFlow " + (position + 1));
+            var position = workspace.desktops.indexOf(current) + 1;
+            workspace.createDesktop(position, "KFlow " + (position + 1));
         }
     }
 
@@ -198,7 +199,7 @@ Item {
     }
 
     Connections {
-        target: Workspace
+        target: workspace
         function onWindowAdded(window) {
             kflow.hookWindow(window);
             kflow.onWorkspaceChanged();
