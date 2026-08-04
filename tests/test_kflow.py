@@ -528,7 +528,7 @@ class DBusServiceHelpersTest(unittest.TestCase):
         self.assertIn("--file", cmd)
         self.assertIn("kwinrc", cmd)
         self.assertIn("--group", cmd)
-        self.assertIn("Script-kflow", cmd)
+        self.assertIn("Script-krohnkite", cmd)
         self.assertIn("--key", cmd)
         self.assertIn("InnerGap", cmd)
         self.assertIn("12", cmd)
@@ -562,7 +562,7 @@ class DBusServiceHelpersTest(unittest.TestCase):
         self.assertEqual(cmd[5], KWIN_SCRIPT_NAME)
 
     def test_build_load_script_command_uses_local_share_kwin_scripts_path(self):
-        self.assertIn(".local/share/kwin/scripts/kflow/contents/ui/main.qml", KWIN_SCRIPT_MAIN_QML)
+        self.assertIn(".local/share/kwin/scripts/krohnkite/contents/ui/main.qml", KWIN_SCRIPT_MAIN_QML)
 
     def test_build_run_script_command(self):
         cmd = build_run_script_command("0", qdbus_bin="qdbus")
@@ -621,6 +621,54 @@ class DBusServiceHelpersTest(unittest.TestCase):
             self.assertIn("vsplit", serialized)
         except Exception as e:
             self.fail(f"Serialización de LayoutTree falló: {e}")
+
+    def test_write_config_maps_inner_gap_to_krohnkite_key(self):
+        with patch.object(dbus_service, "run_command") as mock_run:
+            write_config("InnerGap", 12)
+        cmd = mock_run.call_args.args[0]
+        self.assertIn("screenGapBetween", cmd)
+        self.assertNotIn("InnerGap", cmd)
+
+    def test_write_config_maps_outer_margins_to_krohnkite_keys(self):
+        expected = {
+            "OuterMarginTop": "screenGapTop",
+            "OuterMarginBottom": "screenGapBottom",
+            "OuterMarginLeft": "screenGapLeft",
+            "OuterMarginRight": "screenGapRight",
+        }
+        for gui_key, krohnkite_key in expected.items():
+            with patch.object(dbus_service, "run_command") as mock_run:
+                write_config(gui_key, 4)
+            cmd = mock_run.call_args.args[0]
+            self.assertIn(krohnkite_key, cmd)
+            self.assertNotIn(gui_key, cmd)
+
+    def test_write_config_passes_through_unmapped_keys(self):
+        with patch.object(dbus_service, "run_command") as mock_run:
+            write_config("ActiveProfile", "default")
+        cmd = mock_run.call_args.args[0]
+        self.assertIn("ActiveProfile", cmd)
+
+    def test_apply_and_reconfigure_maps_keys_before_writing(self):
+        updates = {
+            "InnerGap": 8,
+            "OuterMarginTop": 10,
+            "OuterMarginBottom": 10,
+            "OuterMarginLeft": 10,
+            "OuterMarginRight": 10,
+        }
+        with patch.object(dbus_service, "run_command") as mock_run:
+            apply_and_reconfigure(updates)
+
+        written_keys = [
+            c.args[0][c.args[0].index("--key") + 1]
+            for c in mock_run.call_args_list
+            if "--key" in c.args[0]
+        ]
+        self.assertEqual(
+            set(written_keys),
+            {"screenGapBetween", "screenGapTop", "screenGapBottom", "screenGapLeft", "screenGapRight"},
+        )
 
 
 # ===================================================================

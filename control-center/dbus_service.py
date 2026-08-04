@@ -5,7 +5,8 @@ technical_memory.md, HU-04). Este proceso SIN sandbox (el Control Center en
 PyQt6) sí puede, vía QtDBus, y es quien posee el servicio real. Al recibir
 una llamada (setInnerGap, setOuterMargins, setProfile, toggleAutoTiling):
   1. Escribe el valor en kwinrc con `kwriteconfig6 --file kwinrc --group
-     Script-kflow --key <K> <V>`.
+     Script-krohnkite --key <K> <V>` (traduciendo antes la clave a la
+     nomenclatura de Krohnkite vía KROHNKITE_KEY_MAP).
   2. Dispara `qdbus org.kde.KWin /KWin org.kde.KWin.reconfigure`, que KWin
      retransmite como Options.configChanged a kwin-script/contents/ui/dbus.qml.
 """
@@ -24,12 +25,24 @@ except ImportError:  # pragma: no cover - entorno sin PyQt6/QtDBus instalado
 SERVICE_NAME = "org.kde.KWin.KFlow"
 OBJECT_PATH = "/KFlow"
 INTERFACE_NAME = "org.kde.KWin.KFlow"
-KWINRC_GROUP = "Script-kflow"
+KWINRC_GROUP = "Script-krohnkite"
 
-KWIN_SCRIPT_NAME = "kflow"
+KWIN_SCRIPT_NAME = "krohnkite"
 KWIN_SCRIPT_MAIN_QML = os.path.expanduser(
-    "~/.local/share/kwin/scripts/kflow/contents/ui/main.qml"
+    "~/.local/share/kwin/scripts/krohnkite/contents/ui/main.qml"
 )
+
+# Motor nativo Krohnkite: las claves que la GUI de KFlow produce no
+# coinciden con las claves de configuración que Krohnkite lee de kwinrc.
+# Este mapa traduce las claves de la GUI a las claves reales de Krohnkite
+# antes de escribirlas con kwriteconfig6.
+KROHNKITE_KEY_MAP = {
+    "InnerGap": "screenGapBetween",
+    "OuterMarginTop": "screenGapTop",
+    "OuterMarginBottom": "screenGapBottom",
+    "OuterMarginLeft": "screenGapLeft",
+    "OuterMarginRight": "screenGapRight",
+}
 
 LOG_PREFIX = "[KFLOW-GUI]"
 
@@ -100,6 +113,7 @@ def run_command(cmd):
 
 
 def write_config(key, value):
+    key = KROHNKITE_KEY_MAP.get(key, key)
     run_command(build_kwriteconfig_command(key, value))
 
 
@@ -138,7 +152,9 @@ def apply_and_reconfigure(updates):
     """Escribe varias claves en kwinrc y dispara UN solo reconfigure al final.
 
     `updates` es un dict clave → valor. Los valores pueden ser str, int, bool,
-    o dict (se serializan a JSON para claves como LayoutTree)."""
+    o dict (se serializan a JSON para claves como LayoutTree). Las claves se
+    traducen a las claves reales de Krohnkite vía KROHNKITE_KEY_MAP dentro de
+    write_config() antes de escribirlas."""
     print(f"{LOG_PREFIX} apply_and_reconfigure() recibió: {updates}", flush=True)
     for key, value in updates.items():
         if isinstance(value, (dict, list)):
