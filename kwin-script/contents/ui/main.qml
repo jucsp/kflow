@@ -6,17 +6,13 @@ import QtQuick
 import org.kde.kwin
 
 import "script.js" as Engine
+
 Item {
     id: kflow
 
     readonly property int desktopThreshold: 4
-    // Recuerda el último conteo de ventanas por escritorio para disparar la
-    // creación de un escritorio nuevo solo al CRUZAR el umbral (flanco de
-    // subida), no en cada evento mientras el escritorio siga por encima.
     property var lastDesktopCounts: new Map()
 
-    // Ventanas gestionadas: se excluyen las que no son "normales" (paneles,
-    // diálogos, desktops especiales) o que el usuario sacó del tiling.
     function isTileable(window) {
         return window.normalWindow
             && !window.minimized
@@ -49,7 +45,6 @@ Item {
         return result;
     }
 
-    // Recalcula y aplica el layout de tiling dinámico para un escritorio/pantalla.
     function retile(desktop, screen) {
         var bridge = dbusLoader.item;
         if (!bridge || !bridge.autoTilingEnabled) {
@@ -65,15 +60,12 @@ Item {
         }
         var area = Workspace.clientArea(KWin.PlacementArea, screen, desktop);
 
-        // Si hay un layout_tree personalizado Y su número de hojas coincide
-        // con la cantidad de ventanas, úsalo; si no, cae en BSP automático.
         var rects;
         var tree = bridge.layoutTree;
         if (tree && tree.type && Engine.countLeaves(tree) === windows.length) {
             console.log("[KFLOW-KWIN] retile() usando layout_tree personalizado ("
                 + Engine.countLeaves(tree) + " hojas)");
             rects = Engine.computeLayoutFromTree(tree, area, bridge.innerGap, bridge.outerMargins);
-            // Fallback: si computeLayoutFromTree devuelve vacío, usar BSP
             if (!rects || rects.length === 0) {
                 console.log("[KFLOW-KWIN] computeLayoutFromTree() devolvió vacío — fallback a BSP automático");
                 rects = Engine.computeLayout(area, bridge.innerGap, bridge.outerMargins, windows.length);
@@ -94,11 +86,6 @@ Item {
         }
     }
 
-    // Soporte multi-monitor: retilea el escritorio actual en TODAS las
-    // pantallas, no solo en la activa. windowsOnDesktopAndScreen() ya
-    // filtra por w.output === screen, así que cada pantalla se calcula de
-    // forma independiente y las ventanas de un monitor nunca invaden el
-    // área de otro.
     function retileAllScreens() {
         var screens = Workspace.screens;
         var desktop = Workspace.currentDesktop;
@@ -107,12 +94,6 @@ Item {
         }
     }
 
-    // AutoVirtualDesktop: crea un escritorio nuevo si el actual llegó al umbral
-    // y elimina escritorios vacíos (nunca el único restante). Los escritorios
-    // virtuales son globales a todos los monitores en KWin, así que el
-    // conteo (creación Y eliminación) se hace sobre TODAS las pantallas, no
-    // solo la activa — si no, un monitor secundario saturado nunca dispara
-    // la creación de un escritorio nuevo mientras el usuario mira el primario.
     function manageDesktops() {
         var bridge = dbusLoader.item;
         if (!bridge || !bridge.autoVirtualDesktop) {
@@ -160,11 +141,28 @@ Item {
         retileAllScreens();
     }
 
+    function hookWindow(w) {
+        if (!w) return;
+        try {
+            w.desktopsChanged.connect(kflow.onWorkspaceChanged);
+            w.outputChanged.connect(kflow.onWorkspaceChanged);
+            w.minimizedChanged.connect(kflow.onWorkspaceChanged);
+        } catch (e) {}
+    }
+
+    Component.onCompleted: {
+        console.log("[KFLOW-KWIN] Component.onCompleted — inicializando hooks de ventanas existentes...");
+        var all = Workspace.windows;
+        for (var i = 0; i < all.length; ++i) {
+            hookWindow(all[i]);
+        }
+        kflow.onWorkspaceChanged();
+    }
+
     Connections {
         target: Workspace
         function onWindowAdded(window) {
-            window.desktopsChanged.connect(kflow.onWorkspaceChanged);
-            window.outputChanged.connect(kflow.onWorkspaceChanged);
+            kflow.hookWindow(window);
             kflow.onWorkspaceChanged();
         }
         function onWindowRemoved(window) {
@@ -178,13 +176,6 @@ Item {
         }
     }
 
-    // Puente de configuración en vivo (gaps, márgenes, perfiles, toggle).
-    // Se carga vía Loader porque QML solo permite instanciar un componente
-    // como etiqueta si el nombre de archivo coincide con el tipo (p. ej.
-    // "DBusBridge.qml"); como el paquete requiere el nombre "dbus.qml", se
-    // carga por ruta, igual que hace KWin con osd.qml en scripts nativos.
-    // Ver dbus.qml para el detalle de por qué es un puente de configuración
-    // y no un servicio D-Bus propio.
     Loader {
         id: dbusLoader
         source: "dbus.qml"
