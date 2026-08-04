@@ -1,5 +1,7 @@
 # Product Backlog — KFlow (KDE Plasma 6)
 
+> ⚠️ **ESTADO DEL PROYECTO:** DESARROLLO ABANDONADO HASTA NUEVO AVISO.
+
 ## Epics & User Stories
 
 ### Epic 1: Infraestructura & Packaging (PM / QA - Claude)

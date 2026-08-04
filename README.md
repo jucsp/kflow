@@ -1,5 +1,7 @@
 # 🌊 KFlow — Smart Dynamic Tiling & Auto-Desktop Engine for KDE Plasma 6
 
+> ⚠️ **ESTADO DEL PROYECTO:** DESARROLLO ABANDONADO HASTA NUEVO AVISO.
+
 <p align="center">
   <img src="https://img.shields.io/badge/KDE_Plasma-6.0+-3B8EEA?style=for-the-badge&logo=kde&logoColor=white" alt="KDE Plasma 6">
   <img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="License MIT">

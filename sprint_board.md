@@ -1,5 +1,7 @@
 # Tablero de Sprint — KFlow
 
+> ⚠️ **ESTADO DEL PROYECTO:** DESARROLLO ABANDONADO HASTA NUEVO AVISO.
+
 ## Sprint 1: Fundamentos y Motor Core
 
 | ID | Tarea / Historia | Responsable | Estado |
