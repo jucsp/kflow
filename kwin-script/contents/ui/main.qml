@@ -5,7 +5,7 @@
 import QtQuick
 import org.kde.kwin
 
-import "script.js" as Engine
+import "../code/script.js" as Engine
 
 Item {
     id: kflow

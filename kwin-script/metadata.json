@@ -14,9 +14,10 @@
         "Category": "Window Management",
         "License": "GPL-3.0",
         "Version": "0.1.0",
-        "Website": "https://github.com/garagelabs/kflow"
+        "Website": "https://github.com/jucsp/kflow"
     },
     "X-Plasma-API": "declarativescript",
+    "X-Plasma-MainScript": "ui/main.qml",
     "X-KDE-PluginInfo-Category": "Window Management",
     "X-KDE-ServiceTypes": [
         "KWin/Script"
