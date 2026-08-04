@@ -37,6 +37,9 @@
     <entry name="AutoTilingEnabled" type="Bool">
       <default>true</default>
     </entry>
+    <entry name="AutoVirtualDesktop" type="Bool">
+      <default>true</default>
+    </entry>
     <entry name="ActiveProfile" type="String">
       <default>default</default>
     </entry>

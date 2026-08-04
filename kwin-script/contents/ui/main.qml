@@ -71,13 +71,30 @@ Item {
         }
     }
 
-    function retileCurrent() {
-        retile(Workspace.currentDesktop, Workspace.activeScreen);
+    // Soporte multi-monitor: retilea el escritorio actual en TODAS las
+    // pantallas, no solo en la activa. windowsOnDesktopAndScreen() ya
+    // filtra por w.output === screen, así que cada pantalla se calcula de
+    // forma independiente y las ventanas de un monitor nunca invaden el
+    // área de otro.
+    function retileAllScreens() {
+        var screens = Workspace.screens;
+        var desktop = Workspace.currentDesktop;
+        for (var i = 0; i < screens.length; ++i) {
+            retile(desktop, screens[i]);
+        }
     }
 
     // AutoVirtualDesktop: crea un escritorio nuevo si el actual llegó al umbral
-    // y elimina escritorios vacíos (nunca el único restante).
+    // y elimina escritorios vacíos (nunca el único restante). Los escritorios
+    // virtuales son globales a todos los monitores en KWin, así que el
+    // conteo (creación Y eliminación) se hace sobre TODAS las pantallas, no
+    // solo la activa — si no, un monitor secundario saturado nunca dispara
+    // la creación de un escritorio nuevo mientras el usuario mira el primario.
     function manageDesktops() {
+        var bridge = dbusLoader.item;
+        if (!bridge || !bridge.autoVirtualDesktop) {
+            return;
+        }
         var desktops = Workspace.desktops;
         for (var d = desktops.length - 1; d >= 0; --d) {
             var desktop = desktops[d];
@@ -96,7 +113,14 @@ Item {
         }
 
         var current = Workspace.currentDesktop;
-        var currentCount = windowsOnDesktopAndScreen(current, Workspace.activeScreen).length;
+        var currentCount = 0;
+        var allWindows = Workspace.windows;
+        for (var j = 0; j < allWindows.length; ++j) {
+            if (!isTileable(allWindows[j])) continue;
+            if (allWindows[j].onAllDesktops || allWindows[j].desktops.indexOf(current) !== -1) {
+                currentCount++;
+            }
+        }
         var previousCount = kflow.lastDesktopCounts.has(current) ? kflow.lastDesktopCounts.get(current) : 0;
         kflow.lastDesktopCounts.set(current, currentCount);
 
@@ -110,7 +134,7 @@ Item {
 
     function onWorkspaceChanged() {
         manageDesktops();
-        retileCurrent();
+        retileAllScreens();
     }
 
     Connections {
@@ -124,10 +148,10 @@ Item {
             kflow.onWorkspaceChanged();
         }
         function onCurrentDesktopChanged() {
-            kflow.retileCurrent();
+            kflow.retileAllScreens();
         }
         function onScreensChanged() {
-            kflow.retileCurrent();
+            kflow.retileAllScreens();
         }
     }
 

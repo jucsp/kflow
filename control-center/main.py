@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -260,20 +261,6 @@ class KFlowMainWindow(QMainWindow):
         self._ratio_label.setMinimumWidth(32)
         editor_row.addWidget(self._ratio_label)
 
-        editor_row.addStretch()
-
-        # Submenú de plantillas
-        self._template_combo = QComboBox()
-        self._template_combo.addItems(["Grid 2×2", "Master+Stack", "50/50", "Columns"])
-        self._template_combo.setToolTip("Restablecer a una plantilla predefinida")
-        editor_row.addWidget(QLabel("Plantilla:"))
-        editor_row.addWidget(self._template_combo)
-
-        btn_reset_template = QPushButton("Cargar")
-        btn_reset_template.setToolTip("Cargar la plantilla seleccionada")
-        btn_reset_template.clicked.connect(self._on_load_template)
-        editor_row.addWidget(btn_reset_template)
-
         root.addLayout(editor_row)
 
         # --- Controles ---
@@ -361,20 +348,49 @@ class KFlowMainWindow(QMainWindow):
 
     def _build_profiles_group(self) -> QGroupBox:
         gb = QGroupBox("Perfil de layout")
-        layout = QHBoxLayout(gb)
+        outer = QVBoxLayout(gb)
 
+        # --- Fila 1: selección y gestión de perfiles guardados ---
+        row1 = QHBoxLayout()
         self._profile_combo = QComboBox()
         self._profile_combo.currentTextChanged.connect(self._on_profile_selected)
-        layout.addWidget(QLabel("Perfil:"))
-        layout.addWidget(self._profile_combo, stretch=1)
+        row1.addWidget(QLabel("Perfil:"))
+        row1.addWidget(self._profile_combo, stretch=1)
 
-        save_btn = QPushButton("Guardar como...")
-        save_btn.clicked.connect(self._save_current_as_profile)
-        layout.addWidget(save_btn)
+        new_btn = QPushButton("➕ Nuevo Perfil")
+        new_btn.setToolTip("Crear un perfil nuevo con la configuración actual")
+        new_btn.clicked.connect(self._new_profile)
+        row1.addWidget(new_btn)
+
+        save_btn = QPushButton("Guardar")
+        save_btn.setToolTip("Guardar la configuración actual en el perfil seleccionado")
+        save_btn.clicked.connect(self._save_current_profile)
+        row1.addWidget(save_btn)
 
         delete_btn = QPushButton("Eliminar")
         delete_btn.clicked.connect(self._delete_profile)
-        layout.addWidget(delete_btn)
+        row1.addWidget(delete_btn)
+
+        outer.addLayout(row1)
+
+        # --- Fila 2: cargar un preajuste predefinido en el perfil actual ---
+        row2 = QHBoxLayout()
+        self._preset_combo = QComboBox()
+        self._preset_combo.addItems(list(BUILTIN_PROFILES.keys()))
+        self._preset_combo.setToolTip(
+            "Preajuste predefinido para volcar en el perfil actualmente seleccionado"
+        )
+        row2.addWidget(QLabel("Preajuste:"))
+        row2.addWidget(self._preset_combo, stretch=1)
+
+        load_preset_btn = QPushButton("Cargar Preajuste")
+        load_preset_btn.setToolTip(
+            "Aplica el preajuste al perfil actual (gap, márgenes, AVD y layout)"
+        )
+        load_preset_btn.clicked.connect(self._load_preset)
+        row2.addWidget(load_preset_btn)
+
+        outer.addLayout(row2)
 
         self._refresh_profile_list()
         return gb
@@ -436,13 +452,43 @@ class KFlowMainWindow(QMainWindow):
         self._apply_profile_to_ui(profile)
         self._refresh_profile_list()
 
-    def _save_current_as_profile(self):
+    def _new_profile(self):
+        name, ok = QInputDialog.getText(
+            self, "Nuevo perfil", "Nombre del nuevo perfil:"
+        )
+        name = name.strip()
+        if not ok or not name:
+            return
+        if name == "default":
+            QMessageBox.information(
+                self, "Nombre no disponible",
+                "'default' es un perfil reservado. Elige otro nombre."
+            )
+            return
+        if name in self._profile_mgr.list_names():
+            QMessageBox.information(
+                self, "Perfil existente",
+                f"Ya existe un perfil llamado '{name}'. Elige otro nombre."
+            )
+            return
+        self._profile_mgr.save_profile(
+            name=name,
+            inner_gap=self._gap_slider.value(),
+            outer_margins=self._current_margins(),
+            auto_virtual_desktop=self._avd_checkbox.isChecked(),
+            layout_tree=self._preview.layout_tree(),
+        )
+        self._profile_mgr.set_active(name)
+        self._refresh_profile_list()
+        self._apply_current_settings()
+
+    def _save_current_profile(self):
         name = self._profile_combo.currentText()
         if name == "default":
             QMessageBox.information(
                 self, "Perfil de solo lectura",
-                "El perfil 'default' es predefinido. Elige o escribe otro nombre "
-                "en el combo para guardar la configuración actual."
+                "El perfil 'default' es predefinido. Usa '➕ Nuevo Perfil' "
+                "para guardar la configuración actual con otro nombre."
             )
             return
         self._profile_mgr.save_profile(
@@ -453,6 +499,16 @@ class KFlowMainWindow(QMainWindow):
             layout_tree=self._preview.layout_tree(),
         )
         self._refresh_profile_list()
+        self._apply_current_settings()
+
+    def _load_preset(self):
+        """Vuelca un preajuste predefinido (BUILTIN_PROFILES) sobre el
+        perfil actualmente seleccionado, sin crear un perfil nuevo."""
+        name = self._preset_combo.currentText()
+        preset = BUILTIN_PROFILES.get(name)
+        if not preset:
+            return
+        self._apply_profile_to_ui(preset)
         self._apply_current_settings()
 
     def _delete_profile(self):
@@ -492,13 +548,20 @@ class KFlowMainWindow(QMainWindow):
         tree = self._preview.layout_tree()
 
         # Actualizar kwinrc
+        # NOTA (v0.2.2): "AutoTilingEnabled" gobierna el motor de tiling en
+        # sí (siempre activo mientras el script esté cargado; no hay toggle
+        # de UI para desactivarlo) y "AutoVirtualDesktop" gobierna solo la
+        # creación/eliminación automática de escritorios. Antes ambos
+        # conceptos compartían la misma clave, así que desmarcar
+        # "AutoVirtualDesktop" apagaba también el retiling — bug corregido.
         updates = {
             "InnerGap": inner,
             "OuterMarginTop": margins["top"],
             "OuterMarginBottom": margins["bottom"],
             "OuterMarginLeft": margins["left"],
             "OuterMarginRight": margins["right"],
-            "AutoTilingEnabled": auto_vd,
+            "AutoTilingEnabled": True,
+            "AutoVirtualDesktop": auto_vd,
         }
         # Incluir el perfil activo y el layout_tree (serializado a JSON)
         data = self._profile_mgr.load_all()
@@ -563,13 +626,6 @@ class KFlowMainWindow(QMainWindow):
         ratio = value / 100.0
         self._ratio_label.setText(f"{value}%")
         self._preview.set_selected_node_ratio(ratio)
-
-    def _on_load_template(self):
-        """Carga la plantilla seleccionada en el combo de plantillas."""
-        name = self._template_combo.currentText()
-        if name:
-            self._preview.reset_to_template(name)
-            self._schedule_apply()
 
 
 # ---------------------------------------------------------------------------

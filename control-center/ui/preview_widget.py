@@ -8,12 +8,13 @@ import json
 import math
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QCursor
+from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPen, QBrush, QFont, QCursor
 from PyQt6.QtWidgets import QWidget
 
 from tiling_preview import (
     DEFAULT_LAYOUT_TREE,
     TEMPLATE_TREES,
+    apply_outer_margins,
     compute_layout_from_tree,
     tree_to_rects,
     count_leaves,
@@ -25,7 +26,7 @@ ACCENT_COLORS = [
     "#EC407A", "#7F8C8D", "#2ECC71", "#5DADE2",
 ]
 
-VIRTUAL_SCREEN_SIZE = (1920, 1080)
+DEFAULT_VIRTUAL_SCREEN_SIZE = (1920, 1080)
 
 # Umbral en píxeles para considerar "cerca de un divisor" (arrastre)
 DIVIDER_GRAB = 10
@@ -242,9 +243,21 @@ class TilingPreviewWidget(QWidget):
     # ------------------------------------------------------------------
     # Geometría → píxeles
     # ------------------------------------------------------------------
+    def _virtual_screen_size(self):
+        """Tamaño de referencia para el cálculo de proporciones, tomado de la
+        geometría real de la pantalla primaria del usuario (16:9, 21:9,
+        16:10, etc.). Cae a 1920×1080 si no hay pantalla disponible (p.ej.
+        entorno de pruebas headless)."""
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            geo = screen.geometry()
+            if geo.width() > 0 and geo.height() > 0:
+                return geo.width(), geo.height()
+        return DEFAULT_VIRTUAL_SCREEN_SIZE
+
     def _screen_to_widget_scale(self):
         """Factores de escala y offsets para mapear coord virtuales → widget."""
-        virtual_w, virtual_h = VIRTUAL_SCREEN_SIZE
+        virtual_w, virtual_h = self._virtual_screen_size()
         scale = min(self.width() / virtual_w, self.height() / virtual_h)
         offset_x = (self.width() - virtual_w * scale) / 2
         offset_y = (self.height() - virtual_h * scale) / 2
@@ -253,7 +266,8 @@ class TilingPreviewWidget(QWidget):
     def _compute_rects_and_paths(self):
         """Devuelve (rects_en_píxeles, paths) para cada hoja en el árbol."""
         scale, ox, oy = self._screen_to_widget_scale()
-        screen_area = {"x": 0, "y": 0, "width": VIRTUAL_SCREEN_SIZE[0], "height": VIRTUAL_SCREEN_SIZE[1]}
+        virtual_w, virtual_h = self._virtual_screen_size()
+        screen_area = {"x": 0, "y": 0, "width": virtual_w, "height": virtual_h}
         rects = compute_layout_from_tree(
             self._layout_tree, screen_area, self._inner_gap, self._outer_margins
         )
@@ -320,10 +334,29 @@ class TilingPreviewWidget(QWidget):
                                                   base_path + ["second"]))
         return dividers
 
+    def _compute_screen_and_usable_px(self):
+        """Devuelve (rect_pantalla_px, rect_usable_px) para dibujar el borde
+        del monitor y la zona de Outer Padding (Top/Bottom/Left/Right)."""
+        scale, ox, oy = self._screen_to_widget_scale()
+        virtual_w, virtual_h = self._virtual_screen_size()
+        screen_area = {"x": 0, "y": 0, "width": virtual_w, "height": virtual_h}
+        usable = apply_outer_margins(screen_area, self._outer_margins)
+
+        def to_px(area):
+            return {
+                "x": ox + area["x"] * scale,
+                "y": oy + area["y"] * scale,
+                "width": area["width"] * scale,
+                "height": area["height"] * scale,
+            }
+
+        return to_px(screen_area), to_px(usable)
+
     def _compute_dividers(self):
         """Dividers mapeados a coordenadas de widget."""
         scale, ox, oy = self._screen_to_widget_scale()
-        screen_area = {"x": 0, "y": 0, "width": VIRTUAL_SCREEN_SIZE[0], "height": VIRTUAL_SCREEN_SIZE[1]}
+        virtual_w, virtual_h = self._virtual_screen_size()
+        screen_area = {"x": 0, "y": 0, "width": virtual_w, "height": virtual_h}
         raw = self._dividers_from_tree(self._layout_tree, screen_area, [])
         result = []
         for d in raw:
@@ -445,7 +478,7 @@ class TilingPreviewWidget(QWidget):
             return
 
         scale, ox, oy = self._screen_to_widget_scale()
-        virtual_w, virtual_h = VIRTUAL_SCREEN_SIZE
+        virtual_w, virtual_h = self._virtual_screen_size()
 
         if self._drag_axis == "v":
             # Convertir wx a coordenada virtual y calcular ratio
@@ -468,6 +501,29 @@ class TilingPreviewWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor("#1B1E20"))
+
+        # --- Borde de pantalla + zona de Outer Padding (Top/Bottom/Left/Right) ---
+        screen_px, usable_px = self._compute_screen_and_usable_px()
+        painter.fillRect(
+            int(screen_px["x"]), int(screen_px["y"]),
+            int(screen_px["width"]), int(screen_px["height"]),
+            QColor(255, 255, 255, 14),  # zona de margen: tenue, distinta del fondo
+        )
+        painter.fillRect(
+            int(usable_px["x"]), int(usable_px["y"]),
+            int(usable_px["width"]), int(usable_px["height"]),
+            QColor("#1B1E20"),  # área usable: mismo tono que el fondo, "recorta" el margen
+        )
+        painter.setPen(QPen(QColor("#5C6166"), 1, Qt.PenStyle.SolidLine))
+        painter.drawRect(
+            int(screen_px["x"]), int(screen_px["y"]),
+            int(screen_px["width"]), int(screen_px["height"]),
+        )
+        painter.setPen(QPen(QColor("#3DAEE9"), 1, Qt.PenStyle.DashLine))
+        painter.drawRect(
+            int(usable_px["x"]), int(usable_px["y"]),
+            int(usable_px["width"]), int(usable_px["height"]),
+        )
 
         # Recalcular geometría
         self._cached_rects, self._cached_paths = self._compute_rects_and_paths()
