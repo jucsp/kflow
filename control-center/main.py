@@ -220,6 +220,7 @@ class KFlowMainWindow(QMainWindow):
         self._preview = TilingPreviewWidget()
         self._preview.setMinimumHeight(220)
         self._preview.layoutChanged.connect(self._on_layout_edited)
+        self._preview.selectionChanged.connect(self._on_selection_changed)
         root.addWidget(self._preview, stretch=2)
 
         # --- Botones de acción del editor visual ---
@@ -240,6 +241,24 @@ class KFlowMainWindow(QMainWindow):
         btn_delete.setToolTip("Eliminar el recuadro seleccionado y expandir su hermano")
         btn_delete.clicked.connect(self._preview.delete_selected)
         editor_row.addWidget(btn_delete)
+
+        editor_row.addStretch()
+
+        # --- Slider de proporción de división ---
+        editor_row.addWidget(QLabel("Ratio:"))
+        self._ratio_slider = QSlider(Qt.Orientation.Horizontal)
+        self._ratio_slider.setRange(5, 95)  # 0.05 a 0.95
+        self._ratio_slider.setValue(50)
+        self._ratio_slider.setFixedWidth(100)
+        self._ratio_slider.setToolTip("Proporción de división del recuadro seleccionado (5%–95%)")
+        self._ratio_slider.valueChanged.connect(self._on_ratio_slider_changed)
+        self._ratio_slider.sliderReleased.connect(self._schedule_apply)
+        self._ratio_slider.setEnabled(False)
+        editor_row.addWidget(self._ratio_slider)
+
+        self._ratio_label = QLabel("50%")
+        self._ratio_label.setMinimumWidth(32)
+        editor_row.addWidget(self._ratio_label)
 
         editor_row.addStretch()
 
@@ -522,6 +541,28 @@ class KFlowMainWindow(QMainWindow):
     def _on_layout_edited(self):
         """El usuario modificó el árbol (split/delete/drag/reset)."""
         self._schedule_apply()
+
+    def _on_selection_changed(self):
+        """Actualiza el slider de ratio según la selección actual."""
+        ratio = self._preview.selected_node_ratio()
+        if ratio is not None:
+            self._ratio_slider.setEnabled(True)
+            pct = int(round(ratio * 100))
+            self._suppress_apply = True
+            self._ratio_slider.setValue(pct)
+            self._ratio_label.setText(f"{pct}%")
+            self._suppress_apply = False
+        else:
+            self._ratio_slider.setEnabled(False)
+            self._ratio_label.setText("--")
+
+    def _on_ratio_slider_changed(self, value):
+        """El usuario movió el slider de proporción de división."""
+        if self._suppress_apply:
+            return
+        ratio = value / 100.0
+        self._ratio_label.setText(f"{value}%")
+        self._preview.set_selected_node_ratio(ratio)
 
     def _on_load_template(self):
         """Carga la plantilla seleccionada en el combo de plantillas."""

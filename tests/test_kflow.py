@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import unittest
+import copy
 
 # ---------------------------------------------------------------------------
 # Asegurar que control-center/ está en sys.path para importar sus módulos
@@ -37,6 +38,9 @@ from tiling_preview import (
     compute_layout_from_tree,
     DEFAULT_LAYOUT_TREE,
     TEMPLATE_TREES,
+    get_node_at,
+    set_node_at,
+    delete_leaf_at,
 )
 
 from profile_manager import ProfileManager, DEFAULT_PROFILE, PROFILES_PATH
@@ -293,6 +297,134 @@ class LayoutTreeComputeLayoutFromTreeTest(unittest.TestCase):
         )
         self.assertEqual(rects[0]["y"], 100)
         self.assertEqual(rects[0]["height"], 900)
+
+
+# ===================================================================
+# Manipulación de layout_tree (get_node_at, set_node_at, delete_leaf_at)
+# ===================================================================
+class LayoutTreeGetNodeTest(unittest.TestCase):
+    """get_node_at: obtiene el nodo real en una ruta."""
+
+    def setUp(self):
+        self.tree = {
+            "type": "vsplit", "ratio": 0.6,
+            "first": {"type": "leaf"},
+            "second": {
+                "type": "hsplit", "ratio": 0.5,
+                "first": {"type": "leaf"},
+                "second": {"type": "leaf"},
+            },
+        }
+
+    def test_root_path_returns_full_tree(self):
+        node = get_node_at(self.tree, [])
+        self.assertEqual(node["type"], "vsplit")
+
+    def test_first_level_leaf(self):
+        node = get_node_at(self.tree, ["first"])
+        self.assertEqual(node["type"], "leaf")
+
+    def test_deep_nested_leaf(self):
+        node = get_node_at(self.tree, ["second", "first"])
+        self.assertEqual(node["type"], "leaf")
+
+    def test_deep_nested_split(self):
+        node = get_node_at(self.tree, ["second"])
+        self.assertEqual(node["type"], "hsplit")
+        self.assertEqual(node["ratio"], 0.5)
+
+    def test_invalid_path_returns_none(self):
+        self.assertIsNone(get_node_at(self.tree, ["first", "nope"]))
+
+    def test_none_tree_with_empty_path(self):
+        self.assertIsNone(get_node_at(None, []))
+
+    def test_none_tree_with_path(self):
+        self.assertIsNone(get_node_at(None, ["first"]))
+
+
+class LayoutTreeSetNodeTest(unittest.TestCase):
+    """set_node_at: reemplaza un nodo sin mutar el original."""
+
+    def setUp(self):
+        self.tree = {
+            "type": "vsplit", "ratio": 0.5,
+            "first": {"type": "leaf"},
+            "second": {"type": "leaf"},
+        }
+
+    def test_replace_leaf_returns_new_tree(self):
+        new_leaf = {"type": "leaf", "custom": True}
+        new_tree = set_node_at(self.tree, ["first"], new_leaf)
+        # El original no fue mutado
+        self.assertNotIn("custom", self.tree["first"])
+        # El nuevo tiene el reemplazo
+        self.assertTrue(get_node_at(new_tree, ["first"]).get("custom"))
+
+    def test_replace_root(self):
+        new_root = {"type": "leaf"}
+        new_tree = set_node_at(self.tree, [], new_root)
+        self.assertEqual(new_tree["type"], "leaf")
+        self.assertEqual(self.tree["type"], "vsplit")  # original intacto
+
+    def test_invalid_path_returns_copy(self):
+        new_tree = set_node_at(self.tree, ["nope", "invalid"], {"type": "leaf"})
+        self.assertEqual(new_tree["type"], "vsplit")
+        self.assertIn("first", new_tree)
+
+
+class LayoutTreeDeleteLeafTest(unittest.TestCase):
+    """delete_leaf_at: colapsa la división padre y expande el hermano."""
+
+    def setUp(self):
+        # vsplit(first=leafA, second=leafB)
+        self.simple_tree = {
+            "type": "vsplit", "ratio": 0.5,
+            "first": {"type": "leaf", "id": "A"},
+            "second": {"type": "leaf", "id": "B"},
+        }
+
+    def test_delete_first_leaf_collapses_to_second(self):
+        new_tree, sibling = delete_leaf_at(self.simple_tree, ["first"])
+        self.assertEqual(new_tree["type"], "leaf")
+        self.assertEqual(new_tree["id"], "B")
+        self.assertEqual(sibling["id"], "B")
+        # Original intacto
+        self.assertEqual(self.simple_tree["first"]["id"], "A")
+
+    def test_delete_second_leaf_collapses_to_first(self):
+        new_tree, sibling = delete_leaf_at(self.simple_tree, ["second"])
+        self.assertEqual(new_tree["id"], "A")
+        self.assertEqual(sibling["id"], "A")
+
+    def test_delete_last_leaf_does_nothing(self):
+        tree = {"type": "leaf", "id": "solo"}
+        new_tree, sibling = delete_leaf_at(tree, [])
+        self.assertEqual(new_tree["id"], "solo")
+        self.assertIsNone(sibling)
+
+    def test_delete_from_nested_tree(self):
+        # Master+Stack: vsplit(0.6, leaf=master, hsplit(stack1, stack2))
+        tree = copy.deepcopy(TEMPLATE_TREES["Master+Stack"])
+        self.assertEqual(count_leaves(tree), 3)
+        # Eliminar master (path ["first"])
+        new_tree, sibling = delete_leaf_at(tree, ["first"])
+        # Debe colapsar: el hsplit (stack) se convierte en la raíz
+        self.assertEqual(count_leaves(new_tree), 2)
+        self.assertEqual(new_tree["type"], "hsplit")
+
+    def test_original_not_mutated_after_delete(self):
+        tree = copy.deepcopy(TEMPLATE_TREES["50/50"])
+        original_type = tree["type"]
+        delete_leaf_at(tree, ["first"])
+        self.assertEqual(tree["type"], original_type)
+        self.assertIn("first", tree)
+
+    def test_root_path_does_nothing_on_multi_leaf(self):
+        tree = copy.deepcopy(TEMPLATE_TREES["50/50"])
+        new_tree, sib = delete_leaf_at(tree, [])
+        self.assertEqual(count_leaves(new_tree), 2)
+        self.assertIsNone(sib)
 
 
 # ===================================================================

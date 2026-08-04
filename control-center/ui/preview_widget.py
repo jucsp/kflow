@@ -37,9 +37,12 @@ class TilingPreviewWidget(QWidget):
     Señales:
       layoutChanged(): emitida cada vez que el árbol se modifica (split,
                        delete, reset, drag).
+      selectionChanged(): emitida cuando cambia la selección (para que la GUI
+                          pueda actualizar el slider de ratio).
     """
 
     layoutChanged = pyqtSignal()
+    selectionChanged = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -94,6 +97,7 @@ class TilingPreviewWidget(QWidget):
         self._hover_path = None
         self.update()
         self.layoutChanged.emit()
+        self.selectionChanged.emit()
 
     def leaf_count(self):
         return count_leaves(self._layout_tree)
@@ -109,7 +113,9 @@ class TilingPreviewWidget(QWidget):
         self._split_selected("hsplit")
 
     def _split_selected(self, split_type):
-        node, _ = self._resolve_path(self._selected_path)
+        """Divide el nodo seleccionado SI es una hoja. Usa _get_node para
+        obtener el nodo real (no el padre)."""
+        node = self._get_node(self._selected_path)
         if node is None or node.get("type") != "leaf":
             return
         node["type"] = split_type
@@ -120,35 +126,46 @@ class TilingPreviewWidget(QWidget):
         self._selected_path = self._selected_path + ["first"]
         self.update()
         self.layoutChanged.emit()
+        self.selectionChanged.emit()
 
     def delete_selected(self):
-        """Elimina el recuadro seleccionado y expande su hermano. No permite
-        eliminar el último recuadro (debe quedar al menos una hoja)."""
+        """Elimina el recuadro seleccionado y expande su hermano, colapsando
+        la división. No permite eliminar el último recuadro.
+        
+        Lógica corregida (v0.2.1): usa _get_node para obtener el nodo hermano
+        real, no el padre-del-hermano como hacía _resolve_path antes.
+        """
         if count_leaves(self._layout_tree) <= 1:
             return
         if not self._selected_path:
             return
-        # El padre es la ruta sin el último elemento
+
+        # Ruta al padre y al hermano
         parent_path = self._selected_path[:-1]
         sibling_key = "second" if self._selected_path[-1] == "first" else "first"
         sibling_path = parent_path + [sibling_key]
 
-        parent, _ = self._resolve_path(parent_path)
-        sibling_node, _ = self._resolve_path(sibling_path)
-        if parent is None or sibling_node is None:
+        # Obtener el nodo hermano REAL (no el padre)
+        sibling_node = self._get_node(sibling_path)
+        if sibling_node is None:
             return
 
-        # Reemplazar el padre con el hermano (colapsar el split)
+        # Colapsar: reemplazar el padre con el hermano superviviente
         if parent_path:
-            grandparent, last_key = self._resolve_path(parent_path[:-1])
-            grandparent[last_key] = sibling_node
+            # Hay un abuelo: reemplazar el hijo correspondiente
+            grandparent = self._get_node(parent_path[:-1])
+            if grandparent is None:
+                return
+            grandparent[parent_path[-1]] = sibling_node
         else:
-            # El padre es la raíz
+            # El padre es la raíz: el hermano se convierte en la nueva raíz
             self._layout_tree = sibling_node
 
+        # Nueva selección: la posición donde estaba el padre (si existe)
         self._selected_path = parent_path[:-1] if parent_path else []
         self.update()
         self.layoutChanged.emit()
+        self.selectionChanged.emit()
 
     def reset_to_template(self, template_name):
         """Carga una plantilla predefinida por nombre (Grid 2x2, Master+Stack,
@@ -160,14 +177,36 @@ class TilingPreviewWidget(QWidget):
             self._hover_path = None
             self.update()
             self.layoutChanged.emit()
+            self.selectionChanged.emit()
 
     # ------------------------------------------------------------------
     # Navegación del árbol
     # ------------------------------------------------------------------
-    def _resolve_path(self, path):
-        """Devuelve (nodo, clave_en_padre) para una ruta. path=[] = raíz."""
+    def _get_node(self, path):
+        """Devuelve el nodo REAL en la ruta dada. path=[] = raíz.
+        
+        A diferencia de _resolve_path (que devuelve padre+key para poder
+        reemplazar hijos), este método devuelve el nodo mismo. Usar cuando
+        se necesita inspeccionar/modificar el contenido del nodo.
+        """
         if not path:
-            return self._layout_tree, None
+            return self._layout_tree
+        node = self._layout_tree
+        for key in path:
+            if not isinstance(node, dict) or key not in node:
+                return None
+            node = node[key]
+        return node
+
+    def _resolve_path(self, path):
+        """Devuelve (padre, clave_en_padre) para una ruta. path=[] = raíz.
+        
+        Útil para operaciones que necesitan reemplazar un hijo en el padre:
+            parent, key = self._resolve_path(path)
+            parent[key] = new_child
+        """
+        if not path:
+            return None, None  # la raíz no tiene padre
         node = self._layout_tree
         for i, key in enumerate(path):
             if not isinstance(node, dict) or key not in node:
@@ -175,7 +214,30 @@ class TilingPreviewWidget(QWidget):
             if i == len(path) - 1:
                 return node, key
             node = node[key]
-        return node, None
+        return None, None
+
+    # --- Ratio del nodo seleccionado (para slider en GUI) ---
+
+    def selected_node_ratio(self):
+        """Ratio del padre del nodo seleccionado, o None si no aplica."""
+        if not self._selected_path:
+            return None
+        parent_path = self._selected_path[:-1]
+        parent = self._get_node(parent_path)
+        if parent and isinstance(parent, dict) and parent.get("type") in ("vsplit", "hsplit"):
+            return parent.get("ratio", 0.5)
+        return None
+
+    def set_selected_node_ratio(self, ratio):
+        """Establece el ratio del padre del nodo seleccionado (0.05–0.95)."""
+        if not self._selected_path:
+            return
+        parent_path = self._selected_path[:-1]
+        parent = self._get_node(parent_path)
+        if parent and isinstance(parent, dict) and parent.get("type") in ("vsplit", "hsplit"):
+            parent["ratio"] = max(0.05, min(0.95, ratio))
+            self.update()
+            self.layoutChanged.emit()
 
     # ------------------------------------------------------------------
     # Geometría → píxeles
@@ -323,7 +385,7 @@ class TilingPreviewWidget(QWidget):
             self._dragging = True
             self._drag_node_path = divider["path"]
             self._drag_axis = divider["axis"]
-            node, _ = self._resolve_path(divider["path"])
+            node = self._get_node(divider["path"])
             self._drag_start_ratio = node.get("ratio", 0.5) if node else 0.5
             self._drag_start_pos = wx if divider["axis"] == "v" else wy
             self.setCursor(
@@ -337,6 +399,7 @@ class TilingPreviewWidget(QWidget):
         if path is not None:
             self._selected_path = path
             self.update()
+            self.selectionChanged.emit()
 
     def mouseMoveEvent(self, event):
         wx, wy = event.position().x(), event.position().y()
@@ -377,7 +440,7 @@ class TilingPreviewWidget(QWidget):
         """Ajusta el ratio del nodo padre durante el arrastre."""
         if not self._drag_node_path:
             return
-        node, _ = self._resolve_path(self._drag_node_path)
+        node = self._get_node(self._drag_node_path)
         if not node:
             return
 

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    KFlow — Configuración del script KWin 6.
+    Requerido por KWin 6 para que KWin.readConfig() funcione correctamente.
+    Las claves se persisten en ~/.config/kwinrc bajo [Script-kflow].
+-->
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+      http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <group name="General">
+    <entry name="InnerGap" type="Int">
+      <default>8</default>
+      <min>0</min>
+      <max>100</max>
+    </entry>
+    <entry name="OuterMarginTop" type="Int">
+      <default>24</default>
+      <min>0</min>
+      <max>200</max>
+    </entry>
+    <entry name="OuterMarginBottom" type="Int">
+      <default>8</default>
+      <min>0</min>
+      <max>200</max>
+    </entry>
+    <entry name="OuterMarginLeft" type="Int">
+      <default>8</default>
+      <min>0</min>
+      <max>200</max>
+    </entry>
+    <entry name="OuterMarginRight" type="Int">
+      <default>8</default>
+      <min>0</min>
+      <max>200</max>
+    </entry>
+    <entry name="AutoTilingEnabled" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="ActiveProfile" type="String">
+      <default>default</default>
+    </entry>
+    <entry name="LayoutTree" type="String">
+      <default></default>
+    </entry>
+  </group>
+</kcfg>

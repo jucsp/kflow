@@ -25,7 +25,7 @@ OBJECT_PATH = "/KFlow"
 INTERFACE_NAME = "org.kde.KWin.KFlow"
 KWINRC_GROUP = "Script-kflow"
 
-_QDBUS_CANDIDATES = ("qdbus6", "qdbus-qt6", "qdbus")
+_QDBUS_CANDIDATES = ("qdbus-qt6", "qdbus6", "qdbus")
 
 
 def find_qdbus_binary():

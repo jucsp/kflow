@@ -8,6 +8,7 @@ debe actualizarse igual para no desincronizar la vista previa del
 comportamiento real.
 """
 import math
+import copy
 
 DEFAULT_DESKTOP_THRESHOLD = 4
 
@@ -181,3 +182,64 @@ def should_create_desktop(window_count, threshold=None):
 
 def should_remove_desktop(window_count, total_desktops):
     return window_count == 0 and total_desktops > 1
+
+
+# ---------------------------------------------------------------------------
+# Helpers de manipulación de layout_tree (puros, sin Qt — testables)
+# ---------------------------------------------------------------------------
+
+def get_node_at(tree, path):
+    """Devuelve el nodo en la ruta dada (lista de "first"|"second"), o None.
+    path=[] devuelve el árbol completo."""
+    if not path:
+        return tree
+    node = tree
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return None
+        node = node[key]
+    return node
+
+
+def set_node_at(tree, path, new_node):
+    """Devuelve una copia superficial del árbol con el nodo en `path`
+    reemplazado por `new_node`. No modifica el árbol original."""
+    if not path:
+        return copy.deepcopy(new_node) if new_node is not None else None
+    # Navegar hasta el padre
+    result = copy.deepcopy(tree)
+    node = result
+    for i, key in enumerate(path):
+        if not isinstance(node, dict) or key not in node:
+            return copy.deepcopy(tree)  # path inválido, retornar copia intacta
+        if i == len(path) - 1:
+            node[key] = copy.deepcopy(new_node) if new_node is not None else {"type": "leaf"}
+            return result
+        node = node[key]
+    return result
+
+
+def delete_leaf_at(tree, path):
+    """Elimina la hoja en `path` colapsando su división padre. Retorna
+    (nuevo_árbol, hermano_superviviente) o (tree, None) si no se puede."""
+    if not path:
+        # No se puede eliminar la raíz si es la única hoja
+        return copy.deepcopy(tree), None
+    if count_leaves(tree) <= 1:
+        return copy.deepcopy(tree), None
+
+    parent_path = path[:-1]
+    sibling_key = "second" if path[-1] == "first" else "first"
+    sibling_path = parent_path + [sibling_key]
+
+    sibling = get_node_at(tree, sibling_path)
+    if sibling is None:
+        return copy.deepcopy(tree), None
+
+    # Crear nuevo árbol con el hermano en lugar del padre
+    if parent_path:
+        new_tree = set_node_at(tree, parent_path, sibling)
+    else:
+        new_tree = copy.deepcopy(sibling)
+
+    return new_tree, sibling
