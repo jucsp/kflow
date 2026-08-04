@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 import copy
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Asegurar que control-center/ está en sys.path para importar sus módulos
@@ -45,12 +46,18 @@ from tiling_preview import (
 
 from profile_manager import ProfileManager, DEFAULT_PROFILE, PROFILES_PATH
 
+import dbus_service
 from dbus_service import (
     build_kwriteconfig_command,
     build_reconfigure_command,
+    build_unload_script_command,
+    build_load_script_command,
     find_qdbus_binary,
     apply_and_reconfigure,
     write_config,
+    trigger_reconfigure,
+    KWIN_SCRIPT_NAME,
+    KWIN_SCRIPT_MAIN_QML,
 )
 
 
@@ -536,9 +543,45 @@ class DBusServiceHelpersTest(unittest.TestCase):
         self.assertEqual(cmd[2], "/KWin")
         self.assertEqual(cmd[3], "org.kde.KWin.reconfigure")
 
+    def test_build_unload_script_command(self):
+        cmd = build_unload_script_command(qdbus_bin="qdbus")
+        self.assertEqual(cmd[0], "qdbus")
+        self.assertEqual(cmd[1], "org.kde.KWin")
+        self.assertEqual(cmd[2], "/Scripting")
+        self.assertEqual(cmd[3], "org.kde.kwin.Scripting.unloadScript")
+        self.assertEqual(cmd[4], KWIN_SCRIPT_NAME)
+
+    def test_build_load_script_command(self):
+        cmd = build_load_script_command(qdbus_bin="qdbus")
+        self.assertEqual(cmd[0], "qdbus")
+        self.assertEqual(cmd[1], "org.kde.KWin")
+        self.assertEqual(cmd[2], "/Scripting")
+        self.assertEqual(cmd[3], "org.kde.kwin.Scripting.loadDeclarativeScript")
+        self.assertEqual(cmd[4], KWIN_SCRIPT_MAIN_QML)
+        self.assertEqual(cmd[5], KWIN_SCRIPT_NAME)
+
+    def test_build_load_script_command_uses_local_share_kwin_scripts_path(self):
+        self.assertIn(".local/share/kwin/scripts/kflow/contents/ui/main.qml", KWIN_SCRIPT_MAIN_QML)
+
     def test_find_qdbus_binary_returns_string_or_none(self):
         result = find_qdbus_binary()
         self.assertTrue(result is None or isinstance(result, str))
+
+    def test_trigger_reconfigure_calls_reconfigure_then_unload_then_load(self):
+        """trigger_reconfigure() debe disparar /KWin reconfigure y además
+        forzar la recarga del script declarativo vía /Scripting
+        (unloadScript + loadDeclarativeScript), ya que en Plasma 6
+        'reconfigure' por sí solo no reinstancia KWin Scripts declarativos."""
+        with patch.object(dbus_service, "run_command") as mock_run:
+            trigger_reconfigure()
+
+        self.assertEqual(mock_run.call_count, 3)
+        reconfigure_cmd, unload_cmd, load_cmd = (
+            c.args[0] for c in mock_run.call_args_list
+        )
+        self.assertEqual(reconfigure_cmd, build_reconfigure_command())
+        self.assertEqual(unload_cmd, build_unload_script_command())
+        self.assertEqual(load_cmd, build_load_script_command())
 
     def test_apply_and_reconfigure_serializes_dict_to_json(self):
         """Verifica que apply_and_reconfigure acepta dicts y bools sin error

@@ -9,6 +9,7 @@ una llamada (setInnerGap, setOuterMargins, setProfile, toggleAutoTiling):
   2. Dispara `qdbus org.kde.KWin /KWin org.kde.KWin.reconfigure`, que KWin
      retransmite como Options.configChanged a kwin-script/contents/ui/dbus.qml.
 """
+import os
 import shutil
 import subprocess
 
@@ -24,6 +25,11 @@ SERVICE_NAME = "org.kde.KWin.KFlow"
 OBJECT_PATH = "/KFlow"
 INTERFACE_NAME = "org.kde.KWin.KFlow"
 KWINRC_GROUP = "Script-kflow"
+
+KWIN_SCRIPT_NAME = "kflow"
+KWIN_SCRIPT_MAIN_QML = os.path.expanduser(
+    "~/.local/share/kwin/scripts/kflow/contents/ui/main.qml"
+)
 
 LOG_PREFIX = "[KFLOW-GUI]"
 
@@ -47,6 +53,26 @@ def build_reconfigure_command(qdbus_bin=None):
     return [qdbus_bin, "org.kde.KWin", "/KWin", "org.kde.KWin.reconfigure"]
 
 
+def build_unload_script_command(qdbus_bin=None):
+    """En Plasma 6, `/KWin reconfigure` solo recarga efectos del compositor,
+    NO reinstancia KWin Scripts declarativos (ver hallazgo técnico v0.2.7).
+    Hay que descargar el script vía `/Scripting` para forzar su recarga."""
+    qdbus_bin = qdbus_bin or find_qdbus_binary() or "qdbus"
+    return [
+        qdbus_bin, "org.kde.KWin", "/Scripting",
+        "org.kde.kwin.Scripting.unloadScript", KWIN_SCRIPT_NAME,
+    ]
+
+
+def build_load_script_command(qdbus_bin=None, script_path=None):
+    qdbus_bin = qdbus_bin or find_qdbus_binary() or "qdbus"
+    script_path = script_path or KWIN_SCRIPT_MAIN_QML
+    return [
+        qdbus_bin, "org.kde.KWin", "/Scripting",
+        "org.kde.kwin.Scripting.loadDeclarativeScript", script_path, KWIN_SCRIPT_NAME,
+    ]
+
+
 def run_command(cmd):
     """Ejecuta `cmd`, registrando en stdout el comando, su código de retorno
     y su salida (stdout/stderr) con el prefijo LOG_PREFIX, para poder
@@ -67,7 +93,22 @@ def write_config(key, value):
 
 
 def trigger_reconfigure():
+    """Fuerza a KWin 6 a recargar el script declarativo de KFlow.
+
+    `/KWin reconfigure` por sí solo NO reinstancia KWin Scripts declarativos
+    en Plasma 6 (ver hallazgo técnico v0.2.7): solo notifica a los scripts
+    ya cargados vía Options.configChanged, pero si el script no está
+    escuchando esa señal o quedó en un estado inconsistente, los cambios de
+    kwinrc nunca se aplican. Para garantizar la recarga se dispara además
+    unloadScript + loadDeclarativeScript vía la interfaz /Scripting."""
+    print(f"{LOG_PREFIX} [1/3] Disparando /KWin reconfigure...", flush=True)
     run_command(build_reconfigure_command())
+
+    print(f"{LOG_PREFIX} [2/3] Descargando script declarativo '{KWIN_SCRIPT_NAME}' vía /Scripting.unloadScript...", flush=True)
+    run_command(build_unload_script_command())
+
+    print(f"{LOG_PREFIX} [3/3] Recargando script declarativo desde {KWIN_SCRIPT_MAIN_QML} vía /Scripting.loadDeclarativeScript...", flush=True)
+    run_command(build_load_script_command())
 
 
 def apply_and_reconfigure(updates):
