@@ -76,6 +76,64 @@ function computeLayout(screenArea, innerGap, outerMargins, windowCount) {
 }
 
 /**
+ * Convierte un layout_tree (árbol binario) en una lista plana de rectángulos.
+ * Las hojas {"type":"leaf"} producen un rect; los nodos internos particionan.
+ */
+function treeToRects(node, area) {
+    if (!node || node.type === "leaf") {
+        return [{ x: area.x, y: area.y, width: area.width, height: area.height }];
+    }
+
+    var ratio = Math.max(0.05, Math.min(0.95, node.ratio || 0.5));
+
+    if (node.type === "vsplit") {
+        var firstW = area.width * ratio;
+        var secondW = area.width - firstW;
+        var firstArea = { x: area.x, y: area.y, width: firstW, height: area.height };
+        var secondArea = { x: area.x + firstW, y: area.y, width: secondW, height: area.height };
+    } else {
+        var firstH = area.height * ratio;
+        var secondH = area.height - firstH;
+        var firstArea = { x: area.x, y: area.y, width: area.width, height: firstH };
+        var secondArea = { x: area.x, y: area.y + firstH, width: area.width, height: secondH };
+    }
+
+    return treeToRects(node.first, firstArea).concat(treeToRects(node.second, secondArea));
+}
+
+/**
+ * Cuenta el número de hojas (ventanas esperables) en un layout_tree.
+ */
+function countLeaves(node) {
+    if (!node || node.type === "leaf") return 1;
+    return countLeaves(node.first) + countLeaves(node.second);
+}
+
+/**
+ * Aplica un layout_tree personalizado sobre screenArea con márgenes y gap.
+ * Si no hay layout_tree (null/undefined), retorna [] para que main.qml caiga
+ * en el BSP automático.
+ */
+function computeLayoutFromTree(node, screenArea, innerGap, outerMargins) {
+    if (!node || !node.type) return [];
+
+    var usable = applyOuterMargins(screenArea, outerMargins);
+    var rects = treeToRects(node, usable);
+
+    var gap = innerGap || 0;
+    if (gap > 0 && rects.length > 1) {
+        var half = gap / 2.0;
+        for (var i = 0; i < rects.length; i++) {
+            rects[i].x += half;
+            rects[i].y += half;
+            rects[i].width = Math.max(0, rects[i].width - gap);
+            rects[i].height = Math.max(0, rects[i].height - gap);
+        }
+    }
+    return rects;
+}
+
+/**
  * Decide si corresponde crear un nuevo escritorio virtual porque el escritorio
  * activo alcanzó (o superó) el umbral de ventanas configurado.
  */

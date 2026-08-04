@@ -15,6 +15,7 @@ DEFAULT_PROFILE = {
     "inner_gap": 8,
     "outer_margins": {"top": 24, "bottom": 8, "left": 8, "right": 8},
     "auto_virtual_desktop": True,
+    "layout_tree": None,
 }
 
 
@@ -43,13 +44,14 @@ class ProfileManager:
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
-    def save_profile(self, name, inner_gap, outer_margins, auto_virtual_desktop):
+    def save_profile(self, name, inner_gap, outer_margins, auto_virtual_desktop, layout_tree=None):
         data = self.load_all()
         data["profiles"][name] = {
             "name": name,
             "inner_gap": inner_gap,
             "outer_margins": dict(outer_margins),
             "auto_virtual_desktop": auto_virtual_desktop,
+            "layout_tree": layout_tree,
         }
         self.save_all(data)
 

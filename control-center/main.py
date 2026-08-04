@@ -54,6 +54,7 @@ from dbus_service import (
     trigger_reconfigure,
     _HAS_QTDBUS,
 )
+from tiling_preview import TEMPLATE_TREES
 
 # ---------------------------------------------------------------------------
 # Constantes
@@ -75,25 +76,29 @@ DEFAULT_AUTO_VDESKTOP = True
 # Perfiles predefinidos (HU-06)
 # ---------------------------------------------------------------------------
 BUILTIN_PROFILES = {
-    "Grid": {
+    "Grid 2×2": {
         "inner_gap": 8,
         "outer_margins": {"top": 8, "bottom": 8, "left": 8, "right": 8},
         "auto_virtual_desktop": True,
+        "layout_tree": TEMPLATE_TREES.get("Grid 2×2"),
     },
     "Master+Stack": {
         "inner_gap": 4,
         "outer_margins": {"top": 24, "bottom": 4, "left": 4, "right": 4},
         "auto_virtual_desktop": True,
+        "layout_tree": TEMPLATE_TREES.get("Master+Stack"),
     },
     "50/50": {
         "inner_gap": 0,
         "outer_margins": {"top": 0, "bottom": 0, "left": 0, "right": 0},
         "auto_virtual_desktop": False,
+        "layout_tree": TEMPLATE_TREES.get("50/50"),
     },
     "Columns": {
         "inner_gap": 12,
         "outer_margins": {"top": 12, "bottom": 12, "left": 12, "right": 12},
         "auto_virtual_desktop": True,
+        "layout_tree": TEMPLATE_TREES.get("Columns"),
     },
 }
 
@@ -214,7 +219,43 @@ class KFlowMainWindow(QMainWindow):
         # --- Vista previa interactiva ---
         self._preview = TilingPreviewWidget()
         self._preview.setMinimumHeight(220)
+        self._preview.layoutChanged.connect(self._on_layout_edited)
         root.addWidget(self._preview, stretch=2)
+
+        # --- Botones de acción del editor visual ---
+        editor_row = QHBoxLayout()
+        editor_row.setSpacing(6)
+
+        btn_split_v = QPushButton("Dividir ↕")
+        btn_split_v.setToolTip("Dividir el recuadro seleccionado en 2 columnas (verticalmente)")
+        btn_split_v.clicked.connect(self._preview.split_vertical)
+        editor_row.addWidget(btn_split_v)
+
+        btn_split_h = QPushButton("Dividir ↔")
+        btn_split_h.setToolTip("Dividir el recuadro seleccionado en 2 filas (horizontalmente)")
+        btn_split_h.clicked.connect(self._preview.split_horizontal)
+        editor_row.addWidget(btn_split_h)
+
+        btn_delete = QPushButton("Eliminar")
+        btn_delete.setToolTip("Eliminar el recuadro seleccionado y expandir su hermano")
+        btn_delete.clicked.connect(self._preview.delete_selected)
+        editor_row.addWidget(btn_delete)
+
+        editor_row.addStretch()
+
+        # Submenú de plantillas
+        self._template_combo = QComboBox()
+        self._template_combo.addItems(["Grid 2×2", "Master+Stack", "50/50", "Columns"])
+        self._template_combo.setToolTip("Restablecer a una plantilla predefinida")
+        editor_row.addWidget(QLabel("Plantilla:"))
+        editor_row.addWidget(self._template_combo)
+
+        btn_reset_template = QPushButton("Cargar")
+        btn_reset_template.setToolTip("Cargar la plantilla seleccionada")
+        btn_reset_template.clicked.connect(self._on_load_template)
+        editor_row.addWidget(btn_reset_template)
+
+        root.addLayout(editor_row)
 
         # --- Controles ---
         controls = QVBoxLayout()
@@ -359,6 +400,13 @@ class KFlowMainWindow(QMainWindow):
         self._avd_checkbox.setChecked(
             profile.get("auto_virtual_desktop", DEFAULT_AUTO_VDESKTOP)
         )
+        # Cargar layout_tree del perfil en el editor visual
+        tree = profile.get("layout_tree")
+        if tree and isinstance(tree, dict) and "type" in tree:
+            self._preview.set_layout_tree(tree)
+        else:
+            # Si el perfil no trae árbol, mantener el actual del editor
+            pass
         self._suppress_apply = False
         self._update_preview()
 
@@ -383,6 +431,7 @@ class KFlowMainWindow(QMainWindow):
             inner_gap=self._gap_slider.value(),
             outer_margins=self._current_margins(),
             auto_virtual_desktop=self._avd_checkbox.isChecked(),
+            layout_tree=self._preview.layout_tree(),
         )
         self._refresh_profile_list()
         self._apply_current_settings()
@@ -421,6 +470,7 @@ class KFlowMainWindow(QMainWindow):
         inner = self._gap_slider.value()
         margins = self._current_margins()
         auto_vd = self._avd_checkbox.isChecked()
+        tree = self._preview.layout_tree()
 
         # Actualizar kwinrc
         updates = {
@@ -429,18 +479,26 @@ class KFlowMainWindow(QMainWindow):
             "OuterMarginBottom": margins["bottom"],
             "OuterMarginLeft": margins["left"],
             "OuterMarginRight": margins["right"],
-            "AutoTilingEnabled": "true" if auto_vd else "false",
+            "AutoTilingEnabled": auto_vd,
         }
+        # Incluir el perfil activo y el layout_tree (serializado a JSON)
+        data = self._profile_mgr.load_all()
+        active_name = data.get("active", "default")
+        updates["ActiveProfile"] = active_name
+        if tree and isinstance(tree, dict) and "type" in tree:
+            updates["LayoutTree"] = tree
+        else:
+            updates["LayoutTree"] = ""
+
         apply_and_reconfigure(updates)
 
         # Persistir en perfil activo
-        data = self._profile_mgr.load_all()
-        active_name = data.get("active", "default")
         self._profile_mgr.save_profile(
             name=active_name,
             inner_gap=inner,
             outer_margins=margins,
             auto_virtual_desktop=auto_vd,
+            layout_tree=tree,
         )
 
     def _current_margins(self) -> dict:
@@ -457,6 +515,20 @@ class KFlowMainWindow(QMainWindow):
         self._preview.set_outer_margins(
             m["top"], m["bottom"], m["left"], m["right"]
         )
+
+    # ------------------------------------------------------------------
+    # Callbacks del editor visual
+    # ------------------------------------------------------------------
+    def _on_layout_edited(self):
+        """El usuario modificó el árbol (split/delete/drag/reset)."""
+        self._schedule_apply()
+
+    def _on_load_template(self):
+        """Carga la plantilla seleccionada en el combo de plantillas."""
+        name = self._template_combo.currentText()
+        if name:
+            self._preview.reset_to_template(name)
+            self._schedule_apply()
 
 
 # ---------------------------------------------------------------------------
@@ -516,8 +588,13 @@ def _seed_builtin_profiles(profile_mgr: ProfileManager):
     changed = False
     for name, values in BUILTIN_PROFILES.items():
         if name not in data["profiles"]:
-            data["profiles"][name] = dict(values)
-            data["profiles"][name]["name"] = name
+            data["profiles"][name] = {
+                "name": name,
+                "inner_gap": values["inner_gap"],
+                "outer_margins": dict(values["outer_margins"]),
+                "auto_virtual_desktop": values["auto_virtual_desktop"],
+                "layout_tree": values.get("layout_tree"),
+            }
             changed = True
     if changed:
         profile_mgr.save_all(data)

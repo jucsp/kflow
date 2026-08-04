@@ -50,8 +50,23 @@ Item {
             return;
         }
         var area = Workspace.clientArea(KWin.PlacementArea, screen, desktop);
-        var rects = Engine.computeLayout(area, bridge.innerGap, bridge.outerMargins, windows.length);
-        for (var i = 0; i < windows.length; ++i) {
+
+        // Si hay un layout_tree personalizado Y su número de hojas coincide
+        // con la cantidad de ventanas, úsalo; si no, cae en BSP automático.
+        var rects;
+        var tree = bridge.layoutTree;
+        if (tree && tree.type && Engine.countLeaves(tree) === windows.length) {
+            rects = Engine.computeLayoutFromTree(tree, area, bridge.innerGap, bridge.outerMargins);
+            // Fallback: si computeLayoutFromTree devuelve vacío, usar BSP
+            if (!rects || rects.length === 0) {
+                rects = Engine.computeLayout(area, bridge.innerGap, bridge.outerMargins, windows.length);
+            }
+        } else {
+            rects = Engine.computeLayout(area, bridge.innerGap, bridge.outerMargins, windows.length);
+        }
+
+        var count = Math.min(windows.length, rects.length);
+        for (var i = 0; i < count; ++i) {
             windows[i].frameGeometry = Qt.rect(rects[i].x, rects[i].y, rects[i].width, rects[i].height);
         }
     }

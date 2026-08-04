@@ -36,6 +36,7 @@ QtObject {
     property var outerMargins: ({ top: 24, bottom: 8, left: 8, right: 8 })
     property bool autoTilingEnabled: true
     property string activeProfile: "default"
+    property var layoutTree: null
 
     function reloadFromDisk() {
         innerGap = parseInt(KWin.readConfig("InnerGap", "8"), 10);
@@ -47,6 +48,18 @@ QtObject {
         };
         autoTilingEnabled = KWin.readConfig("AutoTilingEnabled", "true") === "true";
         activeProfile = KWin.readConfig("ActiveProfile", "default");
+
+        // layout_tree: JSON serializado en kwinrc
+        var raw = KWin.readConfig("LayoutTree", "");
+        if (raw !== "") {
+            try {
+                layoutTree = JSON.parse(raw);
+            } catch (e) {
+                layoutTree = null;
+            }
+        } else {
+            layoutTree = null;
+        }
     }
 
     function setInnerGap(pixels) {

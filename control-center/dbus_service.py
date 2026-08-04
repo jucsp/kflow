@@ -58,8 +58,16 @@ def trigger_reconfigure():
 
 
 def apply_and_reconfigure(updates):
-    """Escribe varias claves en kwinrc y dispara UN solo reconfigure al final."""
+    """Escribe varias claves en kwinrc y dispara UN solo reconfigure al final.
+    
+    `updates` es un dict clave → valor. Los valores pueden ser str, int, bool,
+    o dict (se serializan a JSON para claves como LayoutTree)."""
     for key, value in updates.items():
+        if isinstance(value, (dict, list)):
+            import json
+            value = json.dumps(value, separators=(",", ":"))
+        elif isinstance(value, bool):
+            value = "true" if value else "false"
         write_config(key, value)
     trigger_reconfigure()
 

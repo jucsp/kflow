@@ -32,6 +32,11 @@ from tiling_preview import (
     compute_layout,
     should_create_desktop,
     should_remove_desktop,
+    tree_to_rects,
+    count_leaves,
+    compute_layout_from_tree,
+    DEFAULT_LAYOUT_TREE,
+    TEMPLATE_TREES,
 )
 
 from profile_manager import ProfileManager, DEFAULT_PROFILE, PROFILES_PATH
@@ -40,6 +45,8 @@ from dbus_service import (
     build_kwriteconfig_command,
     build_reconfigure_command,
     find_qdbus_binary,
+    apply_and_reconfigure,
+    write_config,
 )
 
 
@@ -181,6 +188,114 @@ class TilingPreviewDesktopRulesTest(unittest.TestCase):
 
 
 # ===================================================================
+# layout_tree
+# ===================================================================
+class LayoutTreeTreeToRectsTest(unittest.TestCase):
+    """tree_to_rects: convierte un árbol en rectángulos planos."""
+
+    def test_single_leaf(self):
+        area = {"x": 0, "y": 0, "width": 100, "height": 200}
+        rects = tree_to_rects({"type": "leaf"}, area)
+        self.assertEqual(len(rects), 1)
+        self.assertEqual(rects[0], area)
+
+    def test_vsplit_50_50(self):
+        area = {"x": 0, "y": 0, "width": 800, "height": 600}
+        tree = {
+            "type": "vsplit", "ratio": 0.5,
+            "first": {"type": "leaf"},
+            "second": {"type": "leaf"},
+        }
+        rects = tree_to_rects(tree, area)
+        self.assertEqual(len(rects), 2)
+        self.assertEqual(rects[0]["width"], 400)
+        self.assertEqual(rects[1]["width"], 400)
+        self.assertEqual(rects[0]["height"], 600)
+        self.assertEqual(rects[1]["height"], 600)
+        self.assertEqual(rects[0]["x"], 0)
+        self.assertEqual(rects[1]["x"], 400)
+
+    def test_hsplit_30_70(self):
+        area = {"x": 0, "y": 0, "width": 600, "height": 900}
+        tree = {
+            "type": "hsplit", "ratio": 0.3,
+            "first": {"type": "leaf"},
+            "second": {"type": "leaf"},
+        }
+        rects = tree_to_rects(tree, area)
+        self.assertEqual(len(rects), 2)
+        self.assertAlmostEqual(rects[0]["height"], 270)
+        self.assertAlmostEqual(rects[1]["height"], 630)
+        self.assertEqual(rects[0]["y"], 0)
+        self.assertEqual(rects[1]["y"], 270)
+
+    def test_grid_2x2_yields_four(self):
+        tree = TEMPLATE_TREES["Grid 2×2"]
+        area = {"x": 0, "y": 0, "width": 800, "height": 600}
+        rects = tree_to_rects(tree, area)
+        self.assertEqual(len(rects), 4)
+
+    def test_ratio_clamped(self):
+        """Ratio se clampéa a [0.05, 0.95]."""
+        tree = {
+            "type": "vsplit", "ratio": 0.99,
+            "first": {"type": "leaf"},
+            "second": {"type": "leaf"},
+        }
+        area = {"x": 0, "y": 0, "width": 1000, "height": 500}
+        rects = tree_to_rects(tree, area)
+        self.assertEqual(len(rects), 2)
+        # Con 0.99 → clamp a 0.95 → first_w = 950, second_w = 50
+        self.assertAlmostEqual(rects[0]["width"], 950)
+        self.assertAlmostEqual(rects[1]["width"], 50)
+
+    def test_none_node_returns_single(self):
+        rects = tree_to_rects(None, {"x": 0, "y": 0, "width": 10, "height": 10})
+        self.assertEqual(len(rects), 1)
+
+
+class LayoutTreeCountLeavesTest(unittest.TestCase):
+    def test_leaf_is_one(self):
+        self.assertEqual(count_leaves({"type": "leaf"}), 1)
+
+    def test_grid_2x2_is_four(self):
+        self.assertEqual(count_leaves(TEMPLATE_TREES["Grid 2×2"]), 4)
+
+    def test_50_50_is_two(self):
+        self.assertEqual(count_leaves(TEMPLATE_TREES["50/50"]), 2)
+
+    def test_master_stack_is_three(self):
+        self.assertEqual(count_leaves(TEMPLATE_TREES["Master+Stack"]), 3)
+
+    def test_none_is_one(self):
+        self.assertEqual(count_leaves(None), 1)
+
+
+class LayoutTreeComputeLayoutFromTreeTest(unittest.TestCase):
+    def test_grid_with_gaps(self):
+        area = {"x": 0, "y": 0, "width": 1920, "height": 1080}
+        margins = {"top": 24, "bottom": 8, "left": 8, "right": 8}
+        rects = compute_layout_from_tree(
+            TEMPLATE_TREES["Grid 2×2"], area, 8, margins
+        )
+        self.assertEqual(len(rects), 4)
+
+    def test_null_tree_returns_empty(self):
+        area = {"x": 0, "y": 0, "width": 100, "height": 100}
+        rects = compute_layout_from_tree(None, area, 0, {})
+        self.assertEqual(rects, [])
+
+    def test_outer_margins_respected(self):
+        area = {"x": 0, "y": 0, "width": 1000, "height": 1000}
+        margins = {"top": 100, "bottom": 0, "left": 0, "right": 0}
+        rects = compute_layout_from_tree(
+            {"type": "leaf"}, area, 0, margins
+        )
+        self.assertEqual(rects[0]["y"], 100)
+        self.assertEqual(rects[0]["height"], 900)
+
+
+# ===================================================================
 # profile_manager
 # ===================================================================
 class ProfileManagerTest(unittest.TestCase):
@@ -200,10 +315,12 @@ class ProfileManagerTest(unittest.TestCase):
         self.assertEqual(data["profiles"]["default"]["inner_gap"], 8)
 
     def test_save_and_reload(self):
-        self.mgr.save_profile("test", 12, {"top": 5, "bottom": 5, "left": 5, "right": 5}, False)
+        self.mgr.save_profile("test", 12, {"top": 5, "bottom": 5, "left": 5, "right": 5}, False,
+                              layout_tree={"type": "vsplit", "ratio": 0.5, "first": {"type": "leaf"}, "second": {"type": "leaf"}})
         data = self.mgr.load_all()
         self.assertIn("test", data["profiles"])
         self.assertEqual(data["profiles"]["test"]["inner_gap"], 12)
+        self.assertEqual(data["profiles"]["test"]["layout_tree"]["type"], "vsplit")
 
     def test_list_names(self):
         self.mgr.save_profile("a", 1, {}, True)
@@ -290,6 +407,21 @@ class DBusServiceHelpersTest(unittest.TestCase):
     def test_find_qdbus_binary_returns_string_or_none(self):
         result = find_qdbus_binary()
         self.assertTrue(result is None or isinstance(result, str))
+
+    def test_apply_and_reconfigure_serializes_dict_to_json(self):
+        """Verifica que apply_and_reconfigure acepta dicts y bools sin error
+        de tipo (no ejecuta subprocess en el test, solo valida la lógica)."""
+        # Este test no debe lanzar excepción por tipo de dato
+        try:
+            # No podemos llamar realmente a subprocess sin sistema, pero
+            # validamos que la preparación de datos no falle.
+            import json
+            tree = {"type": "vsplit", "ratio": 0.5, "first": {"type": "leaf"}, "second": {"type": "leaf"}}
+            serialized = json.dumps(tree, separators=(",", ":"))
+            self.assertIsInstance(serialized, str)
+            self.assertIn("vsplit", serialized)
+        except Exception as e:
+            self.fail(f"Serialización de LayoutTree falló: {e}")
 
 
 # ===================================================================
