@@ -34,7 +34,7 @@ Item {
     }
 
     function reloadFromDisk() {
-        console.log("[KFLOW-KWIN] reloadFromDisk() — releyendo kwinrc (Script-kflow)...");
+        console.warn("[KFLOW-KWIN] reloadFromDisk() — releyendo kwinrc (Script-kflow)...");
         innerGap = parseInt(KWin.readConfig("InnerGap", "8"), 10);
         outerMargins = {
             top: parseInt(KWin.readConfig("OuterMarginTop", "24"), 10),
@@ -52,7 +52,7 @@ Item {
             try {
                 layoutTree = JSON.parse(raw);
             } catch (e) {
-                console.log("[KFLOW-KWIN] Error al parsear LayoutTree: " + e);
+                console.warn("[KFLOW-KWIN] Error al parsear LayoutTree: " + e);
                 layoutTree = null;
             }
         } else {
@@ -60,7 +60,7 @@ Item {
         }
 
         bridge._lastRawConfig = bridge._rawConfigSnapshot();
-        console.log("[KFLOW-KWIN] Config cargada exitosamente: innerGap=" + innerGap
+        console.warn("[KFLOW-KWIN] Config cargada exitosamente: innerGap=" + innerGap
             + " outerMargins=" + JSON.stringify(outerMargins)
             + " autoTilingEnabled=" + autoTilingEnabled
             + " autoVirtualDesktop=" + autoVirtualDesktop
@@ -97,7 +97,7 @@ Item {
         onTriggered: {
             var snap = bridge._rawConfigSnapshot();
             if (snap !== bridge._lastRawConfig) {
-                console.log("[KFLOW-KWIN] Cambio detectado en kwinrc (poll 300ms) — disparando reloadFromDisk()");
+                console.warn("[KFLOW-KWIN] Cambio detectado en kwinrc (poll 300ms) — disparando reloadFromDisk()");
                 bridge.reloadFromDisk();
                 bridge.configurationChanged();
             }

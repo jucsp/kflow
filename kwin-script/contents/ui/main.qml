@@ -21,30 +21,27 @@ Item {
         outerMargins: { top: 12, bottom: 12, left: 12, right: 12 }
     })
 
-    function isTileable(window) {
-        var isSpecial = window.desktopWindow || window.dock || window.splash || window.notification;
-        var isBusy = window.minimized || window.fullScreen;
-        // En KWin 6 / Wayland, normalWindow puede venir undefined/false para
-        // apps como Ghostty, Alacritty, Konsole, Firefox o Chrome. Se acepta
-        // la ventana si es normalWindow, o si no es special/utility.
-        var result = !isSpecial && !isBusy
-            && (!!window.normalWindow || (!window.specialWindow && !window.utility));
-        console.log("[KFLOW-KWIN] isTileable(\"" + window.caption + "\") = " + result
-            + " [normalWindow=" + window.normalWindow
-            + " specialWindow=" + window.specialWindow
-            + " utility=" + window.utility
-            + " desktopWindow=" + window.desktopWindow
-            + " dock=" + window.dock
-            + " splash=" + window.splash
-            + " notification=" + window.notification
-            + " minimized=" + window.minimized
-            + " fullScreen=" + window.fullScreen + "]");
-        return result;
+    // KROHNKITE PATTERN: en KWin 6, Workspace puede exponer windowList()
+    // (Wayland) o la propiedad windows (X11/versiones previas). Se intenta
+    // primero windowList() y se cae a windows como fallback.
+    function getWindows() {
+        if (typeof Workspace.windowList === 'function') return Workspace.windowList();
+        return Workspace.windows || [];
+    }
+
+    // KROHNKITE PATTERN: filtrado exacto adoptado de src/driver/kwin/kwinwindow.ts
+    function isTileable(w) {
+        if (!w) return false;
+        if (w.specialWindow || w.desktopWindow || w.dock || w.splash || w.notification) return false;
+        if (w.minimized || w.fullScreen) return false;
+        var cls = String(w.resourceClass || w.resourceName || '');
+        if (cls === 'plasmashell' || cls === 'krunner' || cls === 'ksmserver') return false;
+        return true;
     }
 
     function windowsOnDesktopAndScreen(desktop, screen) {
         var result = [];
-        var all = Workspace.windows;
+        var all = getWindows();
         for (var i = 0; i < all.length; ++i) {
             var w = all[i];
             if (!isTileable(w)) continue;
@@ -53,7 +50,7 @@ Item {
                 result.push(w);
             }
         }
-        console.log("[KFLOW-KWIN] Pantalla " + screen + ", escritorio " + desktop
+        console.warn("[KFLOW-KWIN] Pantalla " + screen + ", escritorio " + desktop
             + ": " + result.length + " ventana(s) tileable(s) detectada(s) de " + all.length + " total(es)");
         return result;
     }
@@ -67,17 +64,17 @@ Item {
         var layoutTree = usingFallback ? null : bridge.layoutTree;
 
         if (usingFallback) {
-            console.log("[KFLOW-KWIN] retile() — bridge aún no cargado, usando valores por defecto seguros"
+            console.warn("[KFLOW-KWIN] retile() — bridge aún no cargado, usando valores por defecto seguros"
                 + " (pantalla=" + screen + ", escritorio=" + desktop + ")");
         }
         if (!autoTilingEnabled) {
-            console.log("[KFLOW-KWIN] retile() abortado — autoTilingEnabled=false"
+            console.warn("[KFLOW-KWIN] retile() abortado — autoTilingEnabled=false"
                 + " (pantalla=" + screen + ", escritorio=" + desktop + ")");
             return;
         }
         var windows = windowsOnDesktopAndScreen(desktop, screen);
         if (windows.length === 0) {
-            console.log("[KFLOW-KWIN] retile() sin ventanas que tilear en pantalla=" + screen
+            console.warn("[KFLOW-KWIN] retile() sin ventanas que tilear en pantalla=" + screen
                 + ", escritorio=" + desktop + " — nada que hacer");
             return;
         }
@@ -86,26 +83,28 @@ Item {
         var rects;
         var tree = layoutTree;
         if (tree && tree.type && Engine.countLeaves(tree) === windows.length) {
-            console.log("[KFLOW-KWIN] retile() usando layout_tree personalizado ("
+            console.warn("[KFLOW-KWIN] retile() usando layout_tree personalizado ("
                 + Engine.countLeaves(tree) + " hojas)");
             rects = Engine.computeLayoutFromTree(tree, area, innerGap, outerMargins);
             if (!rects || rects.length === 0) {
-                console.log("[KFLOW-KWIN] computeLayoutFromTree() devolvió vacío — fallback a BSP automático");
+                console.warn("[KFLOW-KWIN] computeLayoutFromTree() devolvió vacío — fallback a BSP automático");
                 rects = Engine.computeLayout(area, innerGap, outerMargins, windows.length);
             }
         } else {
-            console.log("[KFLOW-KWIN] retile() usando BSP automático (sin layout_tree o no coincide el número de hojas)");
+            console.warn("[KFLOW-KWIN] retile() usando BSP automático (sin layout_tree o no coincide el número de hojas)");
             rects = Engine.computeLayout(area, innerGap, outerMargins, windows.length);
         }
 
         var count = Math.min(windows.length, rects.length);
-        console.log("[KFLOW-KWIN] Aplicando retiling en pantalla=" + screen + ", escritorio=" + desktop
+        console.warn("[KFLOW-KWIN] Aplicando retiling en pantalla=" + screen + ", escritorio=" + desktop
             + ": " + count + " ventana(s), área=" + JSON.stringify(area)
             + ", innerGap=" + innerGap + ", outerMargins=" + JSON.stringify(outerMargins));
         for (var i = 0; i < count; ++i) {
-            console.log("[KFLOW-KWIN]   ventana \"" + windows[i].caption + "\" -> geometry="
-                + JSON.stringify(rects[i]));
-            windows[i].frameGeometry = Qt.rect(rects[i].x, rects[i].y, rects[i].width, rects[i].height);
+            var rect = rects[i];
+            var w = windows[i];
+            console.warn('[KFLOW-KWIN] Re-posicionando ventana "' + w.caption + '" a '
+                + rect.x + ',' + rect.y + ' ' + rect.width + 'x' + rect.height);
+            w.frameGeometry = Qt.rect(rect.x, rect.y, rect.width, rect.height);
         }
     }
 
@@ -126,7 +125,7 @@ Item {
         for (var d = desktops.length - 1; d >= 0; --d) {
             var desktop = desktops[d];
             var count = 0;
-            var all = Workspace.windows;
+            var all = getWindows();
             for (var i = 0; i < all.length; ++i) {
                 if (!isTileable(all[i])) continue;
                 if (all[i].onAllDesktops || all[i].desktops.indexOf(desktop) !== -1) {
@@ -141,7 +140,7 @@ Item {
 
         var current = Workspace.currentDesktop;
         var currentCount = 0;
-        var allWindows = Workspace.windows;
+        var allWindows = getWindows();
         for (var j = 0; j < allWindows.length; ++j) {
             if (!isTileable(allWindows[j])) continue;
             if (allWindows[j].onAllDesktops || allWindows[j].desktops.indexOf(current) !== -1) {
@@ -174,24 +173,26 @@ Item {
     }
 
     Component.onCompleted: {
-        console.log("[KFLOW-KWIN] Component.onCompleted — inicializando hooks de ventanas existentes...");
-        var all = Workspace.windows;
+        console.warn("[KFLOW-KWIN] Component.onCompleted — inicializando hooks de ventanas existentes...");
+        var all = getWindows();
         for (var i = 0; i < all.length; ++i) {
             hookWindow(all[i]);
         }
-        kflow.onWorkspaceChanged();
+        kflow.manageDesktops();
+        // KROHNKITE PATTERN: retile inmediato al arrancar (o al recargar el
+        // script vía "Aplicar ahora"), sin esperar al primer evento de workspace.
+        kflow.retileAllScreens();
         initialRetileTimer.start();
     }
 
-    // Reacomoda las ventanas ya abiertas 100ms después del arranque (o al
-    // recargar el script vía "Aplicar ahora"), una vez que dbusLoader.item
-    // ya tuvo tiempo de cargar y el workspace está estable.
+    // Reacomoda las ventanas ya abiertas 200ms después del arranque, una vez
+    // que dbusLoader.item ya tuvo tiempo de cargar y el workspace está estable.
     Timer {
         id: initialRetileTimer
-        interval: 100
+        interval: 200
         repeat: false
         onTriggered: {
-            console.log("[KFLOW-KWIN] initialRetileTimer disparado — forzando retileAllScreens() inicial");
+            console.warn("[KFLOW-KWIN] initialRetileTimer disparado — forzando retileAllScreens() inicial");
             kflow.retileAllScreens();
         }
     }
